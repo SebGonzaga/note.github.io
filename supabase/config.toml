@@ -1,0 +1,4 @@
+project_id = "inkwell-study-notebook"
+
+[functions.gemini-explain]
+verify_jwt = false
