@@ -14,6 +14,7 @@ import * as docStore from './services/storage/documents.js'
 // loads the viewer on first navigation to a document.
 const Documents = lazy(() => import('./pages/Documents.jsx'))
 const DocumentPage = lazy(() => import('./pages/Document.jsx'))
+const Flashcards = lazy(() => import('./pages/Flashcards.jsx'))
 
 export default function App() {
   const { theme, toggleTheme } = useTheme()
@@ -89,6 +90,14 @@ export default function App() {
           element={
             <Suspense fallback={<RouteFallback label="Loading PDF viewer…" />}>
               <DocumentPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/flashcards"
+          element={
+            <Suspense fallback={<RouteFallback label="Loading flashcards…" />}>
+              <Flashcards />
             </Suspense>
           }
         />

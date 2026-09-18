@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { PdfUtil } from '../../services/pdf/pdfjs.js'
 import { newId } from '../../services/storage/db.js'
-
-const HIGHLIGHT_COLORS = ['#ffe066', '#8ce99a', '#a5d8ff', '#eebefa']
+import AiSelectionToolbar from '../ai/AiSelectionToolbar.jsx'
 
 // Renders the PDF's real text as invisible, selectable spans positioned to
 // match the rendered page raster underneath, using pdf.js's own transform
@@ -15,7 +14,7 @@ const HIGHLIGHT_COLORS = ['#ffe066', '#8ce99a', '#a5d8ff', '#eebefa']
 // the page's base scale-1 space (`pageWidth`/`pageHeight`), exactly like
 // ink strokes and typed elements — display zoom is a CSS transform applied
 // by the parent, so nothing here needs to know the current zoom level.
-export default function TextLayer({ page, tool, highlights, onChange, pageWidth, pageHeight }) {
+export default function TextLayer({ page, tool, highlights, onChange, pageWidth, pageHeight, onAskAi, aiDisabled }) {
   const [spans, setSpans] = useState([])
   const [pendingSelection, setPendingSelection] = useState(null) // { rects, text, anchorX, anchorY }
   const containerRef = useRef(null)
@@ -78,8 +77,10 @@ export default function TextLayer({ page, tool, highlights, onChange, pageWidth,
       return
     }
 
+    // Anchor below the end of the selection so the popover never covers
+    // the text that was just selected.
     const last = rects[rects.length - 1]
-    setPendingSelection({ rects, text, anchorX: last.x + last.width, anchorY: last.y })
+    setPendingSelection({ rects, text, anchorX: last.x, anchorY: last.y + last.height })
   }
 
   function saveHighlight(color) {
@@ -132,21 +133,18 @@ export default function TextLayer({ page, tool, highlights, onChange, pageWidth,
       ))}
 
       {pendingSelection && interactive && (
-        <div
-          className="absolute z-10 flex gap-1 rounded-card border border-border bg-surface p-1 shadow-lg"
-          style={{ left: pendingSelection.anchorX + 6, top: Math.max(0, pendingSelection.anchorY - 4) }}
-          onMouseDown={(e) => e.preventDefault()}
-        >
-          {HIGHLIGHT_COLORS.map((c) => (
-            <button
-              key={c}
-              aria-label={`Highlight ${c}`}
-              onClick={() => saveHighlight(c)}
-              className="h-5 w-5 rounded-full border border-black/10"
-              style={{ backgroundColor: c }}
-            />
-          ))}
-        </div>
+        <AiSelectionToolbar
+          x={pendingSelection.anchorX}
+          y={pendingSelection.anchorY}
+          pageWidth={pageWidth}
+          disabled={aiDisabled}
+          onHighlight={saveHighlight}
+          onAiAction={(action) => {
+            onAskAi?.({ text: pendingSelection.text, action })
+            setPendingSelection(null)
+            window.getSelection()?.removeAllRanges()
+          }}
+        />
       )}
     </div>
   )

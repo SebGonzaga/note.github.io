@@ -1,4 +1,4 @@
-import { STORES, getAll, getById, getByIndex, put, remove, newId } from './db.js'
+import { STORES, getAll, getById, getByIndex, put, putMany, remove, removeByIndex, newId } from './db.js'
 
 // ---------- Documents (metadata) ----------
 
@@ -43,14 +43,16 @@ export async function toggleDocumentFavorite(id) {
   return put(STORES.documents, doc)
 }
 
-// Deletion removes the metadata row, the stored file blob, and every
-// per-page annotation row — no orphaned data left behind, matching the
-// "don't leave private files accessible" rule from the spec.
+// Deletion removes the metadata row, the stored file blob, every per-page
+// annotation row, every RAG chunk, and every flashcard — no orphaned data
+// left behind, matching the "don't leave private files accessible" rule
+// from the spec.
 export async function deleteDocument(id) {
   await remove(STORES.documents, id)
   await remove(STORES.files, id)
-  const annotations = await getByIndex(STORES.pdfAnnotations, 'documentId', id)
-  await Promise.all(annotations.map((a) => remove(STORES.pdfAnnotations, a.id)))
+  await removeByIndex(STORES.pdfAnnotations, 'documentId', id)
+  await removeByIndex(STORES.documentChunks, 'documentId', id)
+  await removeByIndex(STORES.flashcards, 'documentId', id)
   return true
 }
 
@@ -83,4 +85,85 @@ export async function setPageAnnotations(documentId, pageNumber, elements) {
   await put(STORES.pdfAnnotations, row)
   await touchDocument(documentId)
   return row
+}
+
+// ---------- RAG index (Phase 6) ----------
+// `indexStatus` lives on the document record itself: 'none' | 'indexing' |
+// 'ready' | 'error'. Chunks live in their own store so re-indexing is just
+// "delete this document's chunks, write new ones" without touching
+// metadata rows other code depends on.
+
+export async function setIndexStatus(documentId, patch) {
+  const doc = await getById(STORES.documents, documentId)
+  if (!doc) return null
+  const next = { ...doc, ...patch }
+  await put(STORES.documents, next)
+  return next
+}
+
+export async function replaceDocumentChunks(documentId, chunks) {
+  await removeByIndex(STORES.documentChunks, 'documentId', documentId)
+  if (chunks.length > 0) await putMany(STORES.documentChunks, chunks)
+  return chunks
+}
+
+// Adds chunks without clearing existing ones first — used to persist each
+// embedding batch as it completes during indexing, so a quota/network
+// failure partway through a long document keeps whatever already succeeded
+// instead of losing it. Callers that want a clean re-index call
+// replaceDocumentChunks once up front, then this per batch.
+export async function appendDocumentChunks(documentId, chunks) {
+  if (chunks.length > 0) await putMany(STORES.documentChunks, chunks)
+  return chunks
+}
+
+export async function getDocumentChunks(documentId) {
+  return getByIndex(STORES.documentChunks, 'documentId', documentId)
+}
+
+// ---------- Flashcards (Phase 6) ----------
+
+export async function listFlashcards(documentId) {
+  const cards = documentId
+    ? await getByIndex(STORES.flashcards, 'documentId', documentId)
+    : await getAll(STORES.flashcards)
+  return cards.sort((a, b) => b.createdAt - a.createdAt)
+}
+
+export async function saveFlashcards(cards) {
+  const now = Date.now()
+  const rows = cards.map((c) => ({
+    id: newId('card'),
+    documentId: c.documentId ?? null,
+    pageNumber: c.pageNumber ?? null,
+    front: c.front,
+    back: c.back,
+    sourceText: c.sourceText ?? null,
+    createdAt: now,
+    // Active-recall stats (spec §29) — updated as the card is reviewed.
+    reviews: 0,
+    correct: 0,
+    lastReviewedAt: null
+  }))
+  await putMany(STORES.flashcards, rows)
+  return rows
+}
+
+export async function recordFlashcardReview(cardId, wasCorrect) {
+  const cards = await getAll(STORES.flashcards)
+  const card = cards.find((c) => c.id === cardId)
+  if (!card) return null
+  const next = {
+    ...card,
+    reviews: card.reviews + 1,
+    correct: card.correct + (wasCorrect ? 1 : 0),
+    lastReviewedAt: Date.now()
+  }
+  await put(STORES.flashcards, next)
+  return next
+}
+
+export async function deleteFlashcard(id) {
+  await remove(STORES.flashcards, id)
+  return true
 }

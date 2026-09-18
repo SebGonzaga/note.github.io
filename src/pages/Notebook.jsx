@@ -9,7 +9,8 @@ import {
   Pencil,
   ChevronLeft,
   ZoomIn,
-  ZoomOut
+  ZoomOut,
+  PanelLeft
 } from 'lucide-react'
 import * as store from '../services/storage/notebooks.js'
 import Button from '../components/common/Button.jsx'
@@ -39,6 +40,9 @@ export default function NotebookPage() {
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
   const [zoom, setZoom] = useState(1)
+  const [pageListOpen, setPageListOpen] = useState(false)
+  const hasAutoFitRef = useRef(false)
+  const canvasAreaRef = useRef(null)
 
   const [tool, setTool] = useState('pen')
   const [toolSettingsMap, setToolSettingsMap] = useState(() =>
@@ -67,6 +71,21 @@ export default function NotebookPage() {
   }, [id])
 
   const activePage = pages.find((p) => p.id === activePageId)
+
+  // On first load, shrink to fit the available width if the full-size page
+  // (850px) wouldn't fit — otherwise a phone screen opens straight into a
+  // page that's mostly off-canvas, requiring horizontal scroll before you
+  // can see anything. Runs once; after that, zoom is entirely up to the
+  // person, and their choice persists across page switches within this
+  // notebook.
+  useEffect(() => {
+    if (hasAutoFitRef.current || !canvasAreaRef.current) return
+    hasAutoFitRef.current = true
+    const available = canvasAreaRef.current.clientWidth - 32 // minus padding
+    if (available > 0 && available < PAGE_WIDTH) {
+      setZoom(Math.max(0.35, +(available / PAGE_WIDTH).toFixed(2)))
+    }
+  }, [activePage])
 
   // Re-seed undo history whenever the active page changes, so history never
   // leaks between pages.
@@ -160,9 +179,21 @@ export default function NotebookPage() {
   }
 
   return (
-    <div className="flex h-full">
-      {/* Page list */}
-      <div className="flex w-48 shrink-0 flex-col border-r border-border bg-surface">
+    <div className="relative flex h-full overflow-hidden">
+      {/* Page list — an off-canvas drawer below `lg`, since 192px is a lot
+          of a phone screen to spend permanently on a page thumbnail rail. */}
+      {pageListOpen && (
+        <div
+          className="fixed inset-0 z-20 bg-black/40 lg:hidden"
+          onClick={() => setPageListOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+      <div
+        className={`fixed inset-y-0 left-0 z-30 flex w-48 shrink-0 flex-col border-r border-border bg-surface transition-transform duration-200 lg:static lg:z-auto lg:translate-x-0 ${
+          pageListOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
         <div className="border-b border-border p-3">
           <button
             onClick={() => navigate('/')}
@@ -176,7 +207,10 @@ export default function NotebookPage() {
           {pages.map((page, index) => (
             <div
               key={page.id}
-              onClick={() => setActivePageId(page.id)}
+              onClick={() => {
+                setActivePageId(page.id)
+                setPageListOpen(false)
+              }}
               className={`group mb-2 cursor-pointer rounded-card border p-1.5 ${
                 page.id === activePageId ? 'border-accent' : 'border-border'
               }`}
@@ -184,7 +218,7 @@ export default function NotebookPage() {
               <div className={`mb-1 h-20 w-full rounded-[6px] paper-${page.background}`} />
               <div className="flex items-center justify-between">
                 <span className="truncate text-xs text-ink">{page.title}</span>
-                <div className="flex opacity-0 group-hover:opacity-100">
+                <div className="flex opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
                   <IconBtn
                     onClick={(e) => {
                       e.stopPropagation()
@@ -235,7 +269,15 @@ export default function NotebookPage() {
 
       {/* Canvas area */}
       <div className="flex flex-1 flex-col overflow-hidden">
-        <div className="flex items-center gap-3 border-b border-border bg-surface px-4 py-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border bg-surface px-3 py-2 sm:px-4">
+          <button
+            aria-label="Toggle page list"
+            onClick={() => setPageListOpen((v) => !v)}
+            className="rounded-card p-1.5 text-muted hover:bg-accent-soft hover:text-ink lg:hidden"
+          >
+            <PanelLeft size={16} />
+          </button>
+
           {editingTitle ? (
             <input
               autoFocus
@@ -243,30 +285,30 @@ export default function NotebookPage() {
               onChange={(e) => setTitleDraft(e.target.value)}
               onBlur={saveTitle}
               onKeyDown={(e) => e.key === 'Enter' && saveTitle()}
-              className="serif rounded-card border border-border bg-paper px-2 py-1 text-lg font-semibold outline-none"
+              className="serif min-w-0 rounded-card border border-border bg-paper px-2 py-1 text-lg font-semibold outline-none"
             />
           ) : (
             <button
-              className="serif flex items-center gap-2 text-lg font-semibold hover:text-accent"
+              className="serif flex min-w-0 items-center gap-2 text-lg font-semibold hover:text-accent"
               onClick={() => {
                 setTitleDraft(notebook.title)
                 setEditingTitle(true)
               }}
             >
-              {notebook.title}
-              <Pencil size={13} className="text-muted" />
+              <span className="truncate">{notebook.title}</span>
+              <Pencil size={13} className="shrink-0 text-muted" />
             </button>
           )}
 
           <div className="flex-1" />
 
           {activePage && (
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 overflow-x-auto">
               {TEMPLATES.map((t) => (
                 <button
                   key={t.id}
                   onClick={() => handleTemplateChange(t.id)}
-                  className={`rounded-card border px-2 py-1 text-xs ${
+                  className={`shrink-0 rounded-card border px-2 py-1 text-xs ${
                     activePage.background === t.id
                       ? 'border-accent text-accent'
                       : 'border-border text-muted hover:text-ink'
@@ -278,8 +320,8 @@ export default function NotebookPage() {
             </div>
           )}
 
-          <div className="ml-3 flex items-center gap-1 border-l border-border pl-3">
-            <IconBtn onClick={() => setZoom((z) => Math.max(0.5, +(z - 0.1).toFixed(2)))}>
+          <div className="flex items-center gap-1 border-l border-border pl-3">
+            <IconBtn onClick={() => setZoom((z) => Math.max(0.3, +(z - 0.1).toFixed(2)))}>
               <ZoomOut size={14} />
             </IconBtn>
             <span className="w-10 text-center text-xs text-muted">{Math.round(zoom * 100)}%</span>
@@ -306,7 +348,7 @@ export default function NotebookPage() {
           onInsertImage={handleInsertImage}
         />
 
-        <div className="flex-1 overflow-auto bg-paper p-8">
+        <div ref={canvasAreaRef} className="flex-1 overflow-auto bg-paper p-4 sm:p-8">
           {activePage ? (
             <div
               className="mx-auto"

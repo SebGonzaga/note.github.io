@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { BookOpen, Clock, Star, Settings, FolderClosed, NotebookText, FileText } from 'lucide-react'
+import { BookOpen, Clock, Star, Settings, FolderClosed, NotebookText, FileText, Layers } from 'lucide-react'
 
 export default function Sidebar({ folders, notebooks, documents = [] }) {
   const linkClass = ({ isActive }) =>
@@ -38,6 +38,10 @@ export default function Sidebar({ folders, notebooks, documents = [] }) {
           {documents.length > 0 && (
             <span className="ml-auto text-xs text-muted">{documents.length}</span>
           )}
+        </NavLink>
+        <NavLink to="/flashcards" className={linkClass}>
+          <Layers size={16} />
+          Flashcards
         </NavLink>
       </nav>
 

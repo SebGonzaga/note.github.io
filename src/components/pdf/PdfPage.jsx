@@ -39,7 +39,9 @@ export default function PdfPage({
   onElementSelectionChange,
   canvasRef,
   elementsRef,
-  isActive
+  isActive,
+  onAskAi,
+  aiDisabled
 }) {
   const rasterRef = useRef(null)
   const [page, setPage] = useState(null)
@@ -119,6 +121,8 @@ export default function PdfPage({
             onChange={(nextHighlights) => onChange([...drawables, ...nextHighlights])}
             pageWidth={size.width}
             pageHeight={size.height}
+            onAskAi={onAskAi}
+            aiDisabled={aiDisabled}
           />
         )}
 

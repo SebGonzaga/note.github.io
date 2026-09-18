@@ -5,7 +5,12 @@ import Toolbar from '../components/toolbar/Toolbar.jsx'
 import PdfPage from '../components/pdf/PdfPage.jsx'
 import PdfThumbnail from '../components/pdf/PdfThumbnail.jsx'
 import Button from '../components/common/Button.jsx'
+import AiPanel from '../components/ai/AiPanel.jsx'
 import { loadPdf } from '../services/pdf/pdfjs.js'
+import * as ai from '../services/ai/aiService.js'
+import { buildPdfContext, DEFAULT_CONTEXT_MODE } from '../services/ai/context.js'
+import { indexDocument } from '../services/ai/rag.js'
+import { getUsage } from '../services/ai/usage.js'
 import { useHistory } from '../hooks/useHistory.js'
 import { TOOL_DEFAULTS } from '../utils/toolDefaults.js'
 import * as docStore from '../services/storage/documents.js'
@@ -20,8 +25,8 @@ export default function Document() {
   const [pdfDoc, setPdfDoc] = useState(null)
   const [error, setError] = useState(null)
   const [pageNumber, setPageNumber] = useState(1)
-  const [zoom, setZoom] = useState(1)
-  const [showThumbnails, setShowThumbnails] = useState(true)
+  const [zoom, setZoom] = useState(() => (window.innerWidth < 640 ? 0.75 : 1))
+  const [showThumbnails, setShowThumbnails] = useState(() => window.innerWidth >= 1024)
 
   const [tool, setTool] = useState('select')
   const [toolSettingsMap, setToolSettingsMap] = useState(TOOL_DEFAULTS)
@@ -32,6 +37,17 @@ export default function Document() {
   const [searchResults, setSearchResults] = useState(null)
   const [searching, setSearching] = useState(false)
   const [showSearch, setShowSearch] = useState(false)
+
+  // AI state. `lastRequestRef` holds everything needed to replay the last
+  // call, which is what powers both "Try again" and follow-up questions
+  // (a follow-up is the same selection and context with a question added).
+  const [aiState, setAiState] = useState(null) // { status, mode, selectedText, result, error }
+  const [contextMode, setContextMode] = useState(DEFAULT_CONTEXT_MODE)
+  const [usage, setUsage] = useState(() => getUsage())
+  const [indexProgress, setIndexProgress] = useState(null) // { done, total }
+  const [indexStatus, setIndexStatus] = useState('none') // 'none' | 'indexing' | 'ready' | 'error'
+  const [chunkCount, setChunkCount] = useState(0)
+  const lastRequestRef = useRef(null)
 
   const canvasApiRef = useRef(null)
   const elementsApiRef = useRef(null)
@@ -68,6 +84,8 @@ export default function Document() {
         setDoc(record)
         setPdfDoc(loaded)
         setPageNumber(1)
+        setIndexStatus(record.indexStatus || 'none')
+        setChunkCount(record.chunkCount || 0)
       } catch {
         if (!cancelled) setError("This PDF couldn't be opened. It may be corrupted or password-protected.")
       }
@@ -145,8 +163,12 @@ export default function Document() {
         e.preventDefault()
         if (e.shiftKey) history.redo()
         else history.undo()
+      } else if (e.key === 'Escape') {
+        setAiState(null)
+        setShowSearch(false)
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
         e.preventDefault()
+        setAiState(null)
         setShowSearch(true)
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && tool === 'select') {
         canvasApiRef.current?.deleteSelected()
@@ -204,6 +226,123 @@ export default function Document() {
     setSearching(false)
   }
 
+  // --- AI: highlight → explain --------------------------------------------
+  // The signature interaction. Gather context around the selection, call the
+  // Edge Function through the AI service, and show the result.
+
+  const runAi = useCallback(
+    async ({ text, action, followUp }) => {
+      if (!pdfDoc || !doc) return
+
+      setShowSearch(false)
+      setAiState({ status: 'loading', mode: followUp ? 'followUp' : action, selectedText: text })
+
+      try {
+        const { context, sources } = await buildPdfContext({
+          pdfDoc,
+          documentId: id,
+          pageNumber,
+          selectedText: text,
+          documentTitle: doc.title,
+          contextMode,
+          indexStatus
+        })
+
+        const request = { selectedText: text, context, sources, contextMode }
+        lastRequestRef.current = { text, action, request }
+
+        let result
+        if (followUp) {
+          result = await ai.askQuestion({ ...request, mode: action }, followUp)
+        } else if (action === 'explain') {
+          result = await ai.explainSelection(request)
+        } else if (action === 'simplify') {
+          result = await ai.simplifySelection(request)
+        } else if (action === 'inContext') {
+          result = await ai.explainInContext(request)
+        } else if (action === 'notes') {
+          result = await ai.makeNotes(request)
+        } else if (action === 'translate') {
+          result = await ai.translate(request, navigator.language || 'English')
+        } else if (action === 'flashcards') {
+          result = await ai.generateFlashcards(request, 5)
+        } else {
+          throw new ai.AiError(`Unknown action "${action}".`)
+        }
+
+        setAiState({
+          status: 'done',
+          mode: followUp ? 'followUp' : action,
+          selectedText: text,
+          result
+        })
+      } catch (err) {
+        setAiState({
+          status: 'error',
+          mode: followUp ? 'followUp' : action,
+          selectedText: text,
+          error: err?.message || 'Something went wrong.'
+        })
+      } finally {
+        setUsage(getUsage())
+      }
+    },
+    [pdfDoc, doc, pageNumber, contextMode, indexStatus]
+  )
+
+  function handleFollowUp(question) {
+    const last = lastRequestRef.current
+    if (!last) return
+    runAi({ text: last.text, action: last.action, followUp: question })
+  }
+
+  function handleRetry() {
+    const last = lastRequestRef.current
+    if (!last) return
+    runAi({ text: last.text, action: last.action })
+  }
+
+  // --- RAG indexing (Phase 6) ----------------------------------------------
+  // Optional, on-demand (not automatic on upload — see rag.js) so a 400-page
+  // PDF someone only skims once doesn't spend embedding calls for nothing.
+
+  const handleIndex = useCallback(async () => {
+    if (!pdfDoc) return
+    setIndexStatus('indexing')
+    setIndexProgress({ done: 0, total: pdfDoc.numPages })
+    try {
+      const { chunkCount: count, warning } = await indexDocument({
+        pdfDoc,
+        documentId: id,
+        onProgress: (done, total) => setIndexProgress({ done, total })
+      })
+      setIndexStatus('ready')
+      setChunkCount(count)
+      if (warning) {
+        // Partial index — still useful, but the person should know it
+        // didn't finish (most likely: ran out of monthly AI requests
+        // partway through a long document).
+        setAiState({ status: 'error', mode: 'explain', error: `Indexing stopped early: ${warning}` })
+      }
+    } catch (err) {
+      setIndexStatus('error')
+      setAiState({ status: 'error', mode: 'explain', error: err?.message || 'Indexing failed.' })
+    } finally {
+      setIndexProgress(null)
+    }
+  }, [pdfDoc, id])
+
+  async function handleSaveFlashcards(cards) {
+    await docStore.saveFlashcards(
+      cards.map((c) => ({
+        ...c,
+        documentId: id,
+        pageNumber,
+        sourceText: aiState?.selectedText ?? null
+      }))
+    )
+  }
+
   function updateToolSettings(patch) {
     setToolSettingsMap((prev) => ({ ...prev, [tool]: { ...prev[tool], ...patch } }))
   }
@@ -231,7 +370,7 @@ export default function Document() {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex items-center gap-3 border-b border-border bg-surface px-4 py-2">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-2 border-b border-border bg-surface px-3 py-2 sm:gap-x-3 sm:px-4">
         <button
           aria-label="Toggle page thumbnails"
           onClick={() => setShowThumbnails((v) => !v)}
@@ -240,9 +379,9 @@ export default function Document() {
           <PanelLeft size={16} />
         </button>
 
-        <div className="min-w-0">
+        <div className="min-w-0 max-w-[45vw] sm:max-w-xs">
           <p className="truncate text-sm font-medium">{doc.title}</p>
-          <p className="text-xs text-muted">
+          <p className="truncate text-xs text-muted">
             {pdfDoc.numPages} page{pdfDoc.numPages === 1 ? '' : 's'}
             {annotationCount > 0 && ` · ${annotationCount} highlight${annotationCount === 1 ? '' : 's'} on this page`}
           </p>
@@ -300,7 +439,12 @@ export default function Document() {
 
         <button
           aria-label="Search in document"
-          onClick={() => setShowSearch((v) => !v)}
+          onClick={() => {
+            setShowSearch((v) => {
+              if (!v) setAiState(null)
+              return !v
+            })
+          }}
           className="rounded-card border border-border p-1.5 text-muted hover:bg-accent-soft hover:text-ink"
         >
           <Search size={15} />
@@ -324,25 +468,35 @@ export default function Document() {
         onInsertImage={(src, w, h) => elementsApiRef.current?.addImage(src, w, h)}
       />
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="relative flex flex-1 overflow-hidden">
         {showThumbnails && (
-          <div className="w-36 shrink-0 overflow-y-auto border-r border-border bg-surface p-2">
-            {Array.from({ length: pdfDoc.numPages }, (_, i) => i + 1).map((n) => (
-              <button
-                key={n}
-                onClick={() => goToPage(n)}
-                className={`mb-2 w-full rounded-card border p-1 text-left ${
-                  n === pageNumber ? 'border-accent bg-accent-soft' : 'border-border hover:bg-accent-soft'
-                }`}
-              >
-                <PdfThumbnail pdfDoc={pdfDoc} pageNumber={n} />
-                <span className="mt-1 block text-center text-xs text-muted">{n}</span>
-              </button>
-            ))}
-          </div>
+          <>
+            <div
+              className="fixed inset-0 z-20 bg-black/40 lg:hidden"
+              onClick={() => setShowThumbnails(false)}
+              aria-hidden="true"
+            />
+            <div className="fixed inset-y-0 left-0 z-30 w-36 shrink-0 overflow-y-auto border-r border-border bg-surface p-2 lg:static lg:z-auto">
+              {Array.from({ length: pdfDoc.numPages }, (_, i) => i + 1).map((n) => (
+                <button
+                  key={n}
+                  onClick={() => {
+                    goToPage(n)
+                    if (window.innerWidth < 1024) setShowThumbnails(false)
+                  }}
+                  className={`mb-2 w-full rounded-card border p-1 text-left ${
+                    n === pageNumber ? 'border-accent bg-accent-soft' : 'border-border hover:bg-accent-soft'
+                  }`}
+                >
+                  <PdfThumbnail pdfDoc={pdfDoc} pageNumber={n} />
+                  <span className="mt-1 block text-center text-xs text-muted">{n}</span>
+                </button>
+              ))}
+            </div>
+          </>
         )}
 
-        <div ref={scrollRef} className="flex-1 overflow-auto bg-paper p-6">
+        <div ref={scrollRef} className="flex-1 overflow-auto bg-paper p-3 sm:p-6">
           <PdfPage
             key={pageNumber}
             pdfDoc={pdfDoc}
@@ -358,11 +512,35 @@ export default function Document() {
             canvasRef={canvasApiRef}
             elementsRef={elementsApiRef}
             isActive
+            onAskAi={runAi}
+            aiDisabled={aiState?.status === 'loading'}
           />
         </div>
 
+        {/* Below `lg`, the AI and search panels are near the width of the
+            screen anyway (320px / 288px), so they become full-screen
+            overlays rather than squeezing the PDF into a sliver. They're
+            kept mutually exclusive (above) so at most one overlay is ever
+            stacked. */}
+        {aiState && (
+          <AiPanel
+            state={aiState}
+            contextMode={contextMode}
+            setContextMode={setContextMode}
+            usage={usage}
+            onClose={() => setAiState(null)}
+            onFollowUp={handleFollowUp}
+            onRetry={aiState.status === 'error' ? handleRetry : null}
+            indexStatus={indexStatus}
+            indexProgress={indexProgress}
+            chunkCount={chunkCount}
+            onIndex={handleIndex}
+            onSaveFlashcards={handleSaveFlashcards}
+          />
+        )}
+
         {showSearch && (
-          <div className="w-72 shrink-0 overflow-y-auto border-l border-border bg-surface p-3">
+          <div className="fixed inset-0 z-30 w-full overflow-y-auto border-l border-border bg-surface p-3 lg:static lg:inset-auto lg:z-auto lg:w-72 lg:shrink-0">
             <div className="mb-3 flex items-center gap-2">
               <form onSubmit={runSearch} className="flex-1">
                 <input

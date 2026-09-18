@@ -69,8 +69,8 @@ export default function Toolbar({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-3 border-b border-border bg-surface px-4 py-2">
-      <div className="flex items-center gap-1 rounded-card border border-border p-1">
+    <div className="flex flex-nowrap items-center gap-3 overflow-x-auto border-b border-border bg-surface px-4 py-2 no-scrollbar">
+      <div className="flex shrink-0 items-center gap-1 rounded-card border border-border p-1">
         {TOOLS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
@@ -86,7 +86,7 @@ export default function Toolbar({
         ))}
       </div>
 
-      <div className="flex items-center gap-1 border-l border-border pl-3">
+      <div className="flex shrink-0 items-center gap-1 border-l border-border pl-3">
         <IconBtn label="Undo" onClick={onUndo} disabled={!canUndo}>
           <Undo2 size={16} />
         </IconBtn>
@@ -95,7 +95,7 @@ export default function Toolbar({
         </IconBtn>
       </div>
 
-      <div className="flex items-center gap-1 border-l border-border pl-3">
+      <div className="flex shrink-0 items-center gap-1 border-l border-border pl-3">
         <IconBtn label="Insert image" onClick={() => fileInputRef.current?.click()}>
           <ImagePlus size={16} />
         </IconBtn>
@@ -109,7 +109,7 @@ export default function Toolbar({
       </div>
 
       {showColor && (
-        <div className="flex items-center gap-1.5 border-l border-border pl-3">
+        <div className="flex shrink-0 items-center gap-1.5 border-l border-border pl-3">
           {PALETTE.map((c) => (
             <button
               key={c}
@@ -132,7 +132,7 @@ export default function Toolbar({
       )}
 
       {showWidth && (
-        <label className="flex items-center gap-2 border-l border-border pl-3 text-xs text-muted">
+        <label className="flex shrink-0 items-center gap-2 border-l border-border pl-3 text-xs text-muted">
           Size
           <input
             type="range"
@@ -147,7 +147,7 @@ export default function Toolbar({
       )}
 
       {showOpacity && (
-        <label className="flex items-center gap-2 border-l border-border pl-3 text-xs text-muted">
+        <label className="flex shrink-0 items-center gap-2 border-l border-border pl-3 text-xs text-muted">
           Opacity
           <input
             type="range"
@@ -163,7 +163,7 @@ export default function Toolbar({
 
       {showTextSettings && (
         <>
-          <label className="flex items-center gap-2 border-l border-border pl-3 text-xs text-muted">
+          <label className="flex shrink-0 items-center gap-2 border-l border-border pl-3 text-xs text-muted">
             Font
             <input
               type="range"
@@ -176,7 +176,7 @@ export default function Toolbar({
             />
           </label>
 
-          <div className="flex items-center gap-1 border-l border-border pl-3">
+          <div className="flex shrink-0 items-center gap-1 border-l border-border pl-3">
             <button
               aria-label="Bold"
               onClick={() => updateSettings({ bold: !settings.bold })}
@@ -197,7 +197,7 @@ export default function Toolbar({
             </button>
           </div>
 
-          <div className="flex items-center gap-1 border-l border-border pl-3">
+          <div className="flex shrink-0 items-center gap-1 border-l border-border pl-3">
             {ALIGN_OPTIONS.map(({ id, icon: Icon }) => (
               <button
                 key={id}
@@ -217,7 +217,7 @@ export default function Toolbar({
       {tool === 'select' && selectionCount > 0 && (
         <button
           onClick={onDeleteSelection}
-          className="flex items-center gap-1.5 rounded-card border border-red-300 px-2.5 py-1 text-xs font-medium text-red-500 hover:bg-red-500/10"
+          className="flex shrink-0 items-center gap-1.5 rounded-card border border-red-300 px-2.5 py-1 text-xs font-medium text-red-500 hover:bg-red-500/10"
         >
           <Trash2 size={13} />
           Delete {selectionCount} selected

@@ -305,7 +305,7 @@ function NotebookGrid({
                 e.stopPropagation()
                 setOpenMenuId(openMenuId === nb.id ? null : nb.id)
               }}
-              className="rounded-card p-1 text-muted opacity-0 group-hover:opacity-100 hover:bg-accent-soft"
+              className="rounded-card p-1 text-muted opacity-100 hover:bg-accent-soft sm:opacity-0 sm:group-hover:opacity-100"
             >
               <MoreVertical size={15} />
             </button>

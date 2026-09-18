@@ -66,6 +66,16 @@ textarea:focus-visible,
 }
 
 /* Paper templates used behind notebook pages */
+/* Hides the scrollbar on horizontally-scrolling toolbars (mobile) while
+   keeping the element scrollable — the content itself is the affordance. */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 .paper-blank {
   background: var(--surface);
 }

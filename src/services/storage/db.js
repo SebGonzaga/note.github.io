@@ -2,7 +2,7 @@
 // Kept dependency-free so the app has zero runtime cost for local-first storage.
 
 const DB_NAME = 'inkwell-study-notebook'
-const DB_VERSION = 2
+const DB_VERSION = 3
 
 export const STORES = {
   folders: 'folders',
@@ -10,7 +10,9 @@ export const STORES = {
   pages: 'pages',
   documents: 'documents',
   files: 'files',
-  pdfAnnotations: 'pdfAnnotations'
+  pdfAnnotations: 'pdfAnnotations',
+  documentChunks: 'documentChunks',
+  flashcards: 'flashcards'
 }
 
 let dbPromise = null
@@ -49,6 +51,19 @@ export function openDB() {
       if (!db.objectStoreNames.contains(STORES.pdfAnnotations)) {
         const annotations = db.createObjectStore(STORES.pdfAnnotations, { keyPath: 'id' })
         annotations.createIndex('documentId', 'documentId', { unique: false })
+      }
+      // Phase 6 — RAG + flashcards. One row per chunk (per document+page),
+      // holding its text and embedding vector — this is the client-side
+      // stand-in for the spec's `document_chunks` + pgvector table, until
+      // Phase 7 moves storage to Supabase Postgres. Flashcards reference
+      // their source document/page the same way annotations do.
+      if (!db.objectStoreNames.contains(STORES.documentChunks)) {
+        const chunks = db.createObjectStore(STORES.documentChunks, { keyPath: 'id' })
+        chunks.createIndex('documentId', 'documentId', { unique: false })
+      }
+      if (!db.objectStoreNames.contains(STORES.flashcards)) {
+        const flashcards = db.createObjectStore(STORES.flashcards, { keyPath: 'id' })
+        flashcards.createIndex('documentId', 'documentId', { unique: false })
       }
     }
 
@@ -99,12 +114,46 @@ export async function put(storeName, value) {
   })
 }
 
+// Writes many rows in a single transaction — used for saving a document's
+// worth of chunks at once rather than one round-trip per chunk.
+export async function putMany(storeName, values) {
+  const db = await openDB()
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(storeName, 'readwrite')
+    const store = transaction.objectStore(storeName)
+    values.forEach((value) => store.put(value))
+    transaction.oncomplete = () => resolve(values)
+    transaction.onerror = () => reject(transaction.error)
+  })
+}
+
 export async function remove(storeName, id) {
   const store = await tx(storeName, 'readwrite')
   return new Promise((resolve, reject) => {
     const req = store.delete(id)
     req.onsuccess = () => resolve(true)
     req.onerror = () => reject(req.error)
+  })
+}
+
+// Deletes every row matching an index value in one transaction — used to
+// clear a document's old chunks before re-indexing, and to cascade-delete
+// chunks/flashcards when a document is deleted.
+export async function removeByIndex(storeName, indexName, value) {
+  const db = await openDB()
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(storeName, 'readwrite')
+    const store = transaction.objectStore(storeName)
+    const cursorReq = store.index(indexName).openCursor(IDBKeyRange.only(value))
+    cursorReq.onsuccess = () => {
+      const cursor = cursorReq.result
+      if (cursor) {
+        cursor.delete()
+        cursor.continue()
+      }
+    }
+    transaction.oncomplete = () => resolve(true)
+    transaction.onerror = () => reject(transaction.error)
   })
 }
 
