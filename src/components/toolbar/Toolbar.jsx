@@ -18,7 +18,29 @@ import {
   Wand2
 } from 'lucide-react'
 import { PALETTE } from '../../utils/toolDefaults.js'
-import { FONT_OPTIONS } from '../../utils/fonts.js'
+import { FONT_OPTIONS, fontFamilyFor } from '../../utils/fonts.js'
+
+// Renders <option>s grouped by category, each previewed in its own font.
+function FontOptions() {
+  const groups = []
+  for (const f of FONT_OPTIONS) {
+    let group = groups.find((g) => g.name === f.group)
+    if (!group) {
+      group = { name: f.group, fonts: [] }
+      groups.push(group)
+    }
+    group.fonts.push(f)
+  }
+  return groups.map((g) => (
+    <optgroup key={g.name} label={g.name}>
+      {g.fonts.map((f) => (
+        <option key={f.id} value={f.id} style={{ fontFamily: f.family }}>
+          {f.label}
+        </option>
+      ))}
+    </optgroup>
+  ))
+}
 
 const TOOLS = [
   { id: 'select', label: 'Select', icon: MousePointer2 },
@@ -151,11 +173,7 @@ export default function Toolbar({
               onChange={(e) => onNeatChange({ font: e.target.value })}
               className={selectClass}
             >
-              {FONT_OPTIONS.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.label}
-                </option>
-              ))}
+              <FontOptions />
             </select>
           )}
         </div>
@@ -250,12 +268,9 @@ export default function Toolbar({
             value={settings.font || 'inter'}
             onChange={(e) => updateSettings({ font: e.target.value })}
             className={`${selectClass} shrink-0`}
+            style={{ fontFamily: fontFamilyFor(settings.font || 'inter') }}
           >
-            {FONT_OPTIONS.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.label}
-              </option>
-            ))}
+            <FontOptions />
           </select>
 
           <div className="flex shrink-0 items-center gap-1 border-l border-border pl-3">
