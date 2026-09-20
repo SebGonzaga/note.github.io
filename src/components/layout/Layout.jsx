@@ -3,7 +3,17 @@ import { Outlet, useLocation } from 'react-router-dom'
 import { Moon, Sun, Search, Menu } from 'lucide-react'
 import Sidebar from '../sidebar/Sidebar.jsx'
 
-export default function Layout({ folders, notebooks, documents, theme, toggleTheme, search, setSearch, context }) {
+export default function Layout({
+  folders,
+  notebooks,
+  documents,
+  theme,
+  toggleTheme,
+  search,
+  setSearch,
+  auth,
+  context
+}) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const location = useLocation()
 
@@ -30,7 +40,7 @@ export default function Layout({ folders, notebooks, documents, theme, toggleThe
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        <Sidebar folders={folders} notebooks={notebooks} documents={documents} />
+        <Sidebar folders={folders} notebooks={notebooks} documents={documents} auth={auth} />
       </div>
 
       <div className="flex flex-1 flex-col overflow-hidden">

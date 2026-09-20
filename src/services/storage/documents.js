@@ -53,6 +53,7 @@ export async function deleteDocument(id) {
   await removeByIndex(STORES.pdfAnnotations, 'documentId', id)
   await removeByIndex(STORES.documentChunks, 'documentId', id)
   await removeByIndex(STORES.flashcards, 'documentId', id)
+  await removeByIndex(STORES.quizzes, 'documentId', id)
   return true
 }
 
@@ -165,5 +166,52 @@ export async function recordFlashcardReview(cardId, wasCorrect) {
 
 export async function deleteFlashcard(id) {
   await remove(STORES.flashcards, id)
+  return true
+}
+
+// ---------- Quizzes (Phase 6) ----------
+
+export async function listQuizzes(documentId) {
+  const quizzes = documentId
+    ? await getByIndex(STORES.quizzes, 'documentId', documentId)
+    : await getAll(STORES.quizzes)
+  return quizzes.sort((a, b) => b.createdAt - a.createdAt)
+}
+
+export async function getQuiz(id) {
+  return getById(STORES.quizzes, id)
+}
+
+export async function saveQuiz({ documentId, pageNumber, title, questions, sources }) {
+  const quiz = {
+    id: newId('quiz'),
+    documentId: documentId ?? null,
+    pageNumber: pageNumber ?? null,
+    title,
+    questions,
+    sources: sources ?? [],
+    createdAt: Date.now(),
+    // Attempt history (spec §28: "Store... Score"): each entry is one
+    // completed attempt, not a running average, so the review page can
+    // show a trend rather than a single flattened number.
+    attempts: []
+  }
+  await put(STORES.quizzes, quiz)
+  return quiz
+}
+
+export async function recordQuizAttempt(quizId, { score, total }) {
+  const quiz = await getById(STORES.quizzes, quizId)
+  if (!quiz) return null
+  const next = {
+    ...quiz,
+    attempts: [...quiz.attempts, { score, total, completedAt: Date.now() }]
+  }
+  await put(STORES.quizzes, next)
+  return next
+}
+
+export async function deleteQuiz(id) {
+  await remove(STORES.quizzes, id)
   return true
 }

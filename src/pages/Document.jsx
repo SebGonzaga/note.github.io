@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Search, X, PanelLeft } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Search, X, PanelLeft, ListChecks } from 'lucide-react'
 import Toolbar from '../components/toolbar/Toolbar.jsx'
 import PdfPage from '../components/pdf/PdfPage.jsx'
 import PdfThumbnail from '../components/pdf/PdfThumbnail.jsx'
 import Button from '../components/common/Button.jsx'
 import AiPanel from '../components/ai/AiPanel.jsx'
+import QuizGenerateModal from '../components/ai/QuizGenerateModal.jsx'
+import QuizPanel from '../components/ai/QuizPanel.jsx'
 import { loadPdf } from '../services/pdf/pdfjs.js'
 import * as ai from '../services/ai/aiService.js'
-import { buildPdfContext, DEFAULT_CONTEXT_MODE } from '../services/ai/context.js'
+import { buildPdfContext, getPageText, getDocumentSampleText, DEFAULT_CONTEXT_MODE } from '../services/ai/context.js'
 import { indexDocument } from '../services/ai/rag.js'
-import { getUsage } from '../services/ai/usage.js'
+import { getUsage } from '../services/ai/serverUsage.js'
 import { useHistory } from '../hooks/useHistory.js'
 import { TOOL_DEFAULTS } from '../utils/toolDefaults.js'
 import * as docStore from '../services/storage/documents.js'
@@ -43,11 +45,22 @@ export default function Document() {
   // (a follow-up is the same selection and context with a question added).
   const [aiState, setAiState] = useState(null) // { status, mode, selectedText, result, error }
   const [contextMode, setContextMode] = useState(DEFAULT_CONTEXT_MODE)
-  const [usage, setUsage] = useState(() => getUsage())
+  const [usage, setUsage] = useState(null)
+  const refreshUsage = () => getUsage().then(setUsage)
   const [indexProgress, setIndexProgress] = useState(null) // { done, total }
   const [indexStatus, setIndexStatus] = useState('none') // 'none' | 'indexing' | 'ready' | 'error'
   const [chunkCount, setChunkCount] = useState(0)
   const lastRequestRef = useRef(null)
+
+  // Quiz state. `showQuizModal` is the config step; `quiz` is the generated
+  // (and already-saved) quiz being taken; `quizGenError` surfaces a
+  // generation failure back into the still-open modal rather than losing
+  // it behind a closed dialog.
+  const [showQuizModal, setShowQuizModal] = useState(false)
+  const [quizGenerating, setQuizGenerating] = useState(false)
+  const [quizGenError, setQuizGenError] = useState(null)
+  const [quizGenErrorCode, setQuizGenErrorCode] = useState(null)
+  const [quiz, setQuiz] = useState(null)
 
   const canvasApiRef = useRef(null)
   const elementsApiRef = useRef(null)
@@ -59,6 +72,11 @@ export default function Document() {
   const historyRef = useRef(null)
   const history = useHistory([])
   historyRef.current = history
+
+  useEffect(() => {
+    refreshUsage()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // --- Load document + PDF ------------------------------------------------
 
@@ -166,9 +184,11 @@ export default function Document() {
       } else if (e.key === 'Escape') {
         setAiState(null)
         setShowSearch(false)
+        setQuiz(null)
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
         e.preventDefault()
         setAiState(null)
+        setQuiz(null)
         setShowSearch(true)
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && tool === 'select') {
         canvasApiRef.current?.deleteSelected()
@@ -235,6 +255,7 @@ export default function Document() {
       if (!pdfDoc || !doc) return
 
       setShowSearch(false)
+      setQuiz(null)
       setAiState({ status: 'loading', mode: followUp ? 'followUp' : action, selectedText: text })
 
       try {
@@ -281,10 +302,11 @@ export default function Document() {
           status: 'error',
           mode: followUp ? 'followUp' : action,
           selectedText: text,
-          error: err?.message || 'Something went wrong.'
+          error: err?.message || 'Something went wrong.',
+          errorCode: err?.code
         })
       } finally {
-        setUsage(getUsage())
+        refreshUsage()
       }
     },
     [pdfDoc, doc, pageNumber, contextMode, indexStatus]
@@ -326,7 +348,12 @@ export default function Document() {
       }
     } catch (err) {
       setIndexStatus('error')
-      setAiState({ status: 'error', mode: 'explain', error: err?.message || 'Indexing failed.' })
+      setAiState({
+        status: 'error',
+        mode: 'explain',
+        error: err?.message || 'Indexing failed.',
+        errorCode: err?.code
+      })
     } finally {
       setIndexProgress(null)
     }
@@ -341,6 +368,74 @@ export default function Document() {
         sourceText: aiState?.selectedText ?? null
       }))
     )
+  }
+
+  // --- Quiz generation (Phase 6) -------------------------------------------
+  // Unlike flashcards (generated from a highlight, previewed, then
+  // explicitly saved), a quiz is generated from a page/document scope you
+  // pick up front and you're about to take immediately — so it's saved as
+  // soon as it's generated (you'd want it in your library even if you
+  // close the tab mid-quiz), and each full pass records an attempt.
+
+  async function handleGenerateQuiz({ count, scope, questionTypes }) {
+    setQuizGenerating(true)
+    setQuizGenError(null)
+    setQuizGenErrorCode(null)
+    try {
+      let text
+      let sources
+      if (scope === 'page') {
+        text = await getPageText(pdfDoc, pageNumber)
+        sources = [{ document: doc.title, page: pageNumber }]
+      } else {
+        const sample = await getDocumentSampleText(pdfDoc)
+        text = sample.text
+        sources = [{ document: doc.title }]
+      }
+
+      if (!text || !text.trim()) {
+        setQuizGenError("Couldn't find any text to quiz on — this page may be a scanned image.")
+        return
+      }
+
+      const request = {
+        selectedText: scope === 'page' ? `Page ${pageNumber} of ${doc.title}` : doc.title,
+        context: text,
+        sources,
+        contextMode: scope
+      }
+      const result = await ai.generateQuiz(request, { count, questionTypes })
+      refreshUsage()
+
+      if (result.questions.length === 0) {
+        setQuizGenError("Couldn't generate quiz questions from that material — try a different page or scope.")
+        return
+      }
+
+      const saved = await docStore.saveQuiz({
+        documentId: id,
+        pageNumber: scope === 'page' ? pageNumber : null,
+        title: `${doc.title}${scope === 'page' ? ` — page ${pageNumber}` : ''} quiz`,
+        questions: result.questions,
+        sources: result.sources
+      })
+
+      setAiState(null)
+      setShowSearch(false)
+      setShowQuizModal(false)
+      setQuiz(saved)
+    } catch (err) {
+      setQuizGenError(err?.message || 'Something went wrong generating the quiz.')
+      setQuizGenErrorCode(err?.code)
+      refreshUsage()
+    } finally {
+      setQuizGenerating(false)
+    }
+  }
+
+  async function handleQuizComplete(score, total) {
+    const updated = await docStore.recordQuizAttempt(quiz.id, { score, total })
+    if (updated) setQuiz(updated)
   }
 
   function updateToolSettings(patch) {
@@ -438,10 +533,21 @@ export default function Document() {
         </div>
 
         <button
+          aria-label="Generate quiz"
+          onClick={() => setShowQuizModal(true)}
+          className="rounded-card border border-border p-1.5 text-muted hover:bg-accent-soft hover:text-ink"
+        >
+          <ListChecks size={15} />
+        </button>
+
+        <button
           aria-label="Search in document"
           onClick={() => {
             setShowSearch((v) => {
-              if (!v) setAiState(null)
+              if (!v) {
+                setAiState(null)
+                setQuiz(null)
+              }
               return !v
             })
           }}
@@ -539,6 +645,8 @@ export default function Document() {
           />
         )}
 
+        {quiz && <QuizPanel quiz={quiz} onClose={() => setQuiz(null)} onComplete={handleQuizComplete} />}
+
         {showSearch && (
           <div className="fixed inset-0 z-30 w-full overflow-y-auto border-l border-border bg-surface p-3 lg:static lg:inset-auto lg:z-auto lg:w-72 lg:shrink-0">
             <div className="mb-3 flex items-center gap-2">
@@ -585,6 +693,20 @@ export default function Document() {
           </div>
         )}
       </div>
+
+      {showQuizModal && (
+        <QuizGenerateModal
+          onClose={() => {
+            setShowQuizModal(false)
+            setQuizGenError(null)
+            setQuizGenErrorCode(null)
+          }}
+          onGenerate={handleGenerateQuiz}
+          generating={quizGenerating}
+          error={quizGenError}
+          errorCode={quizGenErrorCode}
+        />
+      )}
     </div>
   )
 }

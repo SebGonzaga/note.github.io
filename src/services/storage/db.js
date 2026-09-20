@@ -2,7 +2,7 @@
 // Kept dependency-free so the app has zero runtime cost for local-first storage.
 
 const DB_NAME = 'inkwell-study-notebook'
-const DB_VERSION = 3
+const DB_VERSION = 4
 
 export const STORES = {
   folders: 'folders',
@@ -12,7 +12,8 @@ export const STORES = {
   files: 'files',
   pdfAnnotations: 'pdfAnnotations',
   documentChunks: 'documentChunks',
-  flashcards: 'flashcards'
+  flashcards: 'flashcards',
+  quizzes: 'quizzes'
 }
 
 let dbPromise = null
@@ -64,6 +65,10 @@ export function openDB() {
       if (!db.objectStoreNames.contains(STORES.flashcards)) {
         const flashcards = db.createObjectStore(STORES.flashcards, { keyPath: 'id' })
         flashcards.createIndex('documentId', 'documentId', { unique: false })
+      }
+      if (!db.objectStoreNames.contains(STORES.quizzes)) {
+        const quizzes = db.createObjectStore(STORES.quizzes, { keyPath: 'id' })
+        quizzes.createIndex('documentId', 'documentId', { unique: false })
       }
     }
 

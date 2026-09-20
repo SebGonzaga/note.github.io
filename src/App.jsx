@@ -3,8 +3,8 @@ import { Routes, Route } from 'react-router-dom'
 import Layout from './components/layout/Layout.jsx'
 import Home from './pages/Home.jsx'
 import NotebookPage from './pages/Notebook.jsx'
-import Settings from './pages/Settings.jsx'
 import { useTheme } from './hooks/useTheme.js'
+import { useAuth } from './hooks/useAuth.js'
 import * as store from './services/storage/notebooks.js'
 import * as docStore from './services/storage/documents.js'
 
@@ -15,9 +15,23 @@ import * as docStore from './services/storage/documents.js'
 const Documents = lazy(() => import('./pages/Documents.jsx'))
 const DocumentPage = lazy(() => import('./pages/Document.jsx'))
 const Flashcards = lazy(() => import('./pages/Flashcards.jsx'))
+const Quizzes = lazy(() => import('./pages/Quizzes.jsx'))
+// Settings pulls in fflate for backup/restore — small on its own, but
+// there's no reason to make every visitor download it just to open the
+// library. Same reasoning as the PDF routes above.
+const Settings = lazy(() => import('./pages/Settings.jsx'))
+
+// Auth pages are their own standalone layout (no sidebar) — small enough
+// not to bother lazy-loading separately from the main bundle, which
+// already pays the @supabase/supabase-js cost via useAuth().
+import SignIn from './pages/auth/SignIn.jsx'
+import SignUp from './pages/auth/SignUp.jsx'
+import ForgotPassword from './pages/auth/ForgotPassword.jsx'
+import ResetPassword from './pages/auth/ResetPassword.jsx'
 
 export default function App() {
   const { theme, toggleTheme } = useTheme()
+  const auth = useAuth()
   const [folders, setFolders] = useState([])
   const [notebooks, setNotebooks] = useState([])
   const [documents, setDocuments] = useState([])
@@ -54,11 +68,17 @@ export default function App() {
     refreshDocuments,
     search,
     theme,
-    toggleTheme
+    toggleTheme,
+    auth
   }
 
   return (
     <Routes>
+      <Route path="/login" element={<SignIn />} />
+      <Route path="/signup" element={<SignUp />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
+
       <Route
         element={
           <Layout
@@ -69,6 +89,7 @@ export default function App() {
             toggleTheme={toggleTheme}
             search={search}
             setSearch={setSearch}
+            auth={auth}
             context={context}
           />
         }
@@ -101,7 +122,22 @@ export default function App() {
             </Suspense>
           }
         />
-        <Route path="/settings" element={<Settings />} />
+        <Route
+          path="/quizzes"
+          element={
+            <Suspense fallback={<RouteFallback label="Loading quizzes…" />}>
+              <Quizzes />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <Suspense fallback={<RouteFallback label="Loading settings…" />}>
+              <Settings />
+            </Suspense>
+          }
+        />
       </Route>
     </Routes>
   )

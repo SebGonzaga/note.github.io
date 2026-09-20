@@ -1,4 +1,5 @@
-// Supabase Edge Function — "Explain Selection" (Phase 5).
+// Supabase Edge Function — "Explain Selection" (Phase 5), now with real
+// auth and server-side usage enforcement (Phase 7).
 //
 // This is the only place GEMINI_API_KEY is ever read. The frontend calls
 // this function; this function calls Gemini. The key is a Supabase secret
@@ -7,16 +8,22 @@
 // Deploy:   supabase functions deploy gemini-explain
 // Set key:  supabase secrets set GEMINI_API_KEY=your-key-here
 // Call:     POST https://<project-ref>.functions.supabase.co/gemini-explain
+//           with Authorization: Bearer <the signed-in user's access token>
+//           (not the anon key — see authUsage.ts for why that distinction
+//           is what makes the auth check real)
 //
-// NOT YET IMPLEMENTED HERE (deliberately — these land with auth in Phase 7):
-//   - Authenticating the user and verifying document ownership
-//   - Server-side usage limits (tracked client-side for now, which is fine
-//     for shaping cost during development but is NOT a security control)
-// The request/response shape below already matches what those checks will
-// need, so adding them won't change the frontend.
+// NOT YET IMPLEMENTED HERE (deliberately — lands with document ownership
+// once cloud-synced documents exist):
+//   - Verifying the caller owns the document a request references (there's
+//     no server-side document record to check against yet — documents
+//     still live in each browser's IndexedDB, per the Phase 7 README note)
+// Everything else the spec calls for at this layer — authenticating the
+// user, enforcing usage limits server-side — is real as of this function,
+// not just tracked-and-hoped-for.
 
 // deno-lint-ignore-file no-explicit-any
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
+import { authenticate, checkQuota, recordUsage } from '../_shared/authUsage.ts'
 
 const GEMINI_MODEL = 'gemini-2.0-flash'
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`
@@ -27,7 +34,7 @@ const MAX_SELECTED_CHARS = 4000
 const MAX_CONTEXT_CHARS = 24000
 const MAX_FOLLOWUP_CHARS = 1000
 
-const MODES = ['explain', 'simplify', 'inContext', 'notes', 'translate', 'flashcards'] as const
+const MODES = ['explain', 'simplify', 'inContext', 'notes', 'translate', 'flashcards', 'quiz'] as const
 type Mode = (typeof MODES)[number]
 
 const MODE_INSTRUCTIONS: Record<Mode, string> = {
@@ -55,7 +62,14 @@ const MODE_INSTRUCTIONS: Record<Mode, string> = {
     'question or term on the front and a concise, correct answer on the ' +
     'back. Prefer several focused cards over one broad one — each card ' +
     'should test a single fact or idea. Do not pad an answer to sound ' +
-    'more complete than the material supports.'
+    'more complete than the material supports.',
+  quiz:
+    'Create a quiz testing understanding of the material. Mix question ' +
+    'types as instructed. Each question must have exactly one unambiguous ' +
+    'correct answer, verifiable from the supplied material. Write plausible ' +
+    'wrong options for multiple choice — not silly or obviously-wrong ' +
+    'distractors. Do not write a question the material cannot actually ' +
+    'support an answer to.'
 }
 
 const corsHeaders = {
@@ -72,6 +86,23 @@ serve(async (req) => {
     return jsonResponse({ error: 'Method not allowed' }, 405)
   }
 
+  // --- Auth + quota (Phase 7) ---------------------------------------------
+  // Checked before touching the request body: an unauthenticated or
+  // over-quota caller shouldn't cost a JSON parse, let alone a Gemini call.
+  const auth = await authenticate(req)
+  if ('error' in auth) return jsonResponse({ error: auth.error }, auth.status)
+  const { client: userClient, user } = auth
+
+  const quota = await checkQuota(userClient, user.id)
+  if (!quota.allowed) {
+    return jsonResponse(
+      { error: `You've used all ${quota.limit} AI requests included in the ${quota.planName} plan this month.` },
+      429
+    )
+  }
+
+  const started = performance.now()
+
   try {
     const body = await req.json().catch(() => null)
     if (!body) return jsonResponse({ error: 'Invalid JSON body' }, 400)
@@ -84,7 +115,8 @@ serve(async (req) => {
       targetLanguage,
       followUp,
       contextMode,
-      count
+      count,
+      questionTypes
     } = body
 
     // --- Validation ------------------------------------------------------
@@ -112,7 +144,14 @@ serve(async (req) => {
     const trimmedContext = typeof context === 'string' ? context.slice(0, MAX_CONTEXT_CHARS) : ''
     const hasContext = trimmedContext.trim().length > 0
     const isFlashcards = mode === 'flashcards'
+    const isQuiz = mode === 'quiz'
     const cardCount = isFlashcards ? Math.min(10, Math.max(1, Number(count) || 5)) : 0
+    const quizCount = isQuiz ? Math.min(20, Math.max(1, Number(count) || 10)) : 0
+    const allowedTypes = ['multiple_choice', 'true_false', 'identification']
+    const quizTypes =
+      isQuiz && Array.isArray(questionTypes) && questionTypes.length > 0
+        ? questionTypes.filter((t: string) => allowedTypes.includes(t))
+        : allowedTypes
 
     // --- Prompt ----------------------------------------------------------
     // The grounding rules here implement section 11 of the spec: prefer the
@@ -150,6 +189,34 @@ serve(async (req) => {
           '  "usedMaterial": boolean',
           '}'
         ].join('\n')
+      : isQuiz
+      ? [
+          'You are a study assistant creating a quiz from a student’s own study material.',
+          '',
+          groundingRules,
+          '',
+          'STYLE:',
+          `- Allowed question types: ${quizTypes.join(', ')}.`,
+          '- "multiple_choice" needs exactly 4 options, one of them exactly equal to correctAnswer.',
+          '- "true_false" needs options ["True","False"] and correctAnswer is exactly "True" or "False".',
+          '- "identification" has no options; correctAnswer is a short exact answer (a term, name, or number).',
+          '- Every question needs a one-sentence explanation of why the answer is correct.',
+          '- No filler questions. If the material only supports fewer good questions than asked for, return fewer.',
+          '',
+          'OUTPUT FORMAT:',
+          'Respond with a JSON object and nothing else — no markdown fences, no preamble:',
+          '{',
+          '  "questions": [ {',
+          '    "type": "multiple_choice" | "true_false" | "identification",',
+          '    "prompt": string,',
+          '    "options": string[] | null,',
+          '    "correctAnswer": string,',
+          '    "explanation": string',
+          '  } ],',
+          '  "grounding": "material" | "general" | "mixed",',
+          '  "usedMaterial": boolean',
+          '}'
+        ].join('\n')
       : [
           'You are a study assistant helping a student understand their own study material.',
           '',
@@ -173,6 +240,8 @@ serve(async (req) => {
     const promptParts = [
       isFlashcards
         ? `TASK: ${MODE_INSTRUCTIONS.flashcards} Create up to ${cardCount} cards.`
+        : isQuiz
+        ? `TASK: ${MODE_INSTRUCTIONS.quiz} Create up to ${quizCount} questions.`
         : `TASK: ${MODE_INSTRUCTIONS[mode as Mode]}`,
       mode === 'translate' ? `TARGET LANGUAGE: ${targetLanguage || 'English'}` : '',
       `SELECTED TEXT:\n"""\n${selectedText.trim()}\n"""`,
@@ -196,7 +265,12 @@ serve(async (req) => {
         contents: [{ role: 'user', parts: [{ text: promptParts.join('\n\n') }] }],
         generationConfig: {
           temperature: 0.3,
-          maxOutputTokens: 1024,
+          // Flat 1024 is plenty for prose modes, but a 20-question quiz
+          // with options + explanations for each can run well past 2048 —
+          // if the response gets cut off mid-JSON, safeParse fails and the
+          // quiz silently comes back empty. Scale with question count
+          // instead of guessing a bigger flat number.
+          maxOutputTokens: isQuiz ? Math.min(8192, quizCount * 300 + 300) : 1024,
           responseMimeType: 'application/json'
         }
       })
@@ -205,6 +279,11 @@ serve(async (req) => {
     if (!geminiRes.ok) {
       const detail = await geminiRes.text()
       const status = geminiRes.status === 429 ? 429 : 502
+      await recordUsage(userClient, user.id, {
+        feature: mode,
+        durationMs: performance.now() - started,
+        success: false
+      })
       return jsonResponse(
         {
           error:
@@ -227,6 +306,15 @@ serve(async (req) => {
       outputTokens: usage.candidatesTokenCount ?? null
     }
 
+    await recordUsage(userClient, user.id, {
+      feature: mode,
+      model: GEMINI_MODEL,
+      inputTokens: usageOut.inputTokens,
+      outputTokens: usageOut.outputTokens,
+      durationMs: performance.now() - started,
+      success: true
+    })
+
     if (isFlashcards) {
       const cards = Array.isArray(parsed?.cards)
         ? parsed.cards
@@ -236,6 +324,22 @@ serve(async (req) => {
         : []
       return jsonResponse({
         cards,
+        grounding: parsed?.grounding ?? (hasContext ? 'mixed' : 'general'),
+        usedMaterial: parsed?.usedMaterial ?? false,
+        sources: Array.isArray(sources) ? sources : [],
+        usage: usageOut
+      })
+    }
+
+    if (isQuiz) {
+      const questions = Array.isArray(parsed?.questions)
+        ? parsed.questions
+            .map((q: any) => sanitizeQuestion(q))
+            .filter((q: any): q is NonNullable<typeof q> => q !== null)
+            .slice(0, quizCount)
+        : []
+      return jsonResponse({
+        questions,
         grounding: parsed?.grounding ?? (hasContext ? 'mixed' : 'general'),
         usedMaterial: parsed?.usedMaterial ?? false,
         sources: Array.isArray(sources) ? sources : [],
@@ -258,6 +362,42 @@ serve(async (req) => {
     return jsonResponse({ error: err?.message || 'Unexpected error' }, 500)
   }
 })
+
+function sanitizeQuestion(q: any) {
+  if (!q || typeof q.prompt !== 'string' || !q.prompt.trim()) return null
+  const explanation = typeof q.explanation === 'string' ? q.explanation : ''
+
+  if (q.type === 'true_false') {
+    const answer = String(q.correctAnswer ?? '').trim().toLowerCase()
+    if (answer !== 'true' && answer !== 'false') return null
+    return {
+      type: 'true_false',
+      prompt: q.prompt,
+      options: ['True', 'False'],
+      correctAnswer: answer === 'true' ? 'True' : 'False',
+      explanation
+    }
+  }
+
+  if (q.type === 'multiple_choice') {
+    if (!Array.isArray(q.options) || q.options.length < 2) return null
+    const options = q.options.map((o: any) => String(o)).slice(0, 6)
+    const correctAnswer = String(q.correctAnswer ?? '')
+    // Require an exact match to one of the options — an answer that only
+    // "sort of" matches isn't verifiable, and shipping it would mean the
+    // quiz UI can't reliably highlight which option was correct.
+    if (!options.includes(correctAnswer)) return null
+    return { type: 'multiple_choice', prompt: q.prompt, options, correctAnswer, explanation }
+  }
+
+  if (q.type === 'identification') {
+    const correctAnswer = String(q.correctAnswer ?? '').trim()
+    if (!correctAnswer) return null
+    return { type: 'identification', prompt: q.prompt, options: null, correctAnswer, explanation }
+  }
+
+  return null
+}
 
 function safeParse(text: string) {
   if (!text) return null

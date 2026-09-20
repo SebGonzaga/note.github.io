@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link, useLocation } from 'react-router-dom'
 import { X, Copy, Check, Loader2, AlertCircle, Send, BookOpen, Globe, Layers, Database } from 'lucide-react'
 import { CONTEXT_MODES } from '../../services/ai/context.js'
 
@@ -35,6 +36,7 @@ export default function AiPanel({
   const [copied, setCopied] = useState(false)
   const [question, setQuestion] = useState('')
   const [savedCount, setSavedCount] = useState(null)
+  const location = useLocation()
 
   const { status, mode, selectedText, result, error } = state
   const isFlashcards = mode === 'flashcards'
@@ -95,13 +97,23 @@ export default function AiPanel({
               <AlertCircle size={15} className="mt-0.5 shrink-0" />
               <span>{error}</span>
             </div>
-            {onRetry && (
-              <button
-                onClick={onRetry}
-                className="rounded-card border border-border px-2 py-1 text-xs text-ink hover:bg-accent-soft"
+            {state.errorCode === 'auth_required' ? (
+              <Link
+                to="/login"
+                state={{ from: location.pathname }}
+                className="inline-block rounded-card border border-accent bg-accent-soft px-2 py-1 text-xs font-medium text-ink hover:bg-accent hover:text-white"
               >
-                Try again
-              </button>
+                Sign in
+              </Link>
+            ) : (
+              onRetry && (
+                <button
+                  onClick={onRetry}
+                  className="rounded-card border border-border px-2 py-1 text-xs text-ink hover:bg-accent-soft"
+                >
+                  Try again
+                </button>
+              )
             )}
           </div>
         )}

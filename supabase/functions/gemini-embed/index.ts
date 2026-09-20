@@ -1,4 +1,6 @@
-// Supabase Edge Function — batch text embeddings (Phase 6, RAG).
+// Supabase Edge Function — batch text embeddings (Phase 6, RAG), now with
+// real auth and server-side usage enforcement (Phase 7) — see
+// _shared/authUsage.ts for what that actually means.
 //
 // Used two ways by the frontend:
 //   1. Indexing a PDF: embed every chunk of every page, once, in a handful
@@ -8,10 +10,12 @@
 //      this function only ever returns vectors, never does the ranking).
 //
 // Deploy:  supabase functions deploy gemini-embed
-// (Uses the same GEMINI_API_KEY secret as gemini-explain.)
+// (Uses the same GEMINI_API_KEY secret as gemini-explain. Call with
+// Authorization: Bearer <the signed-in user's access token>.)
 
 // deno-lint-ignore-file no-explicit-any
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
+import { authenticate, checkQuota, recordUsage } from '../_shared/authUsage.ts'
 
 const EMBEDDING_MODEL = 'text-embedding-004'
 const EMBED_URL = `https://generativelanguage.googleapis.com/v1beta/models/${EMBEDDING_MODEL}:batchEmbedContents`
@@ -31,6 +35,23 @@ const corsHeaders = {
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (req.method !== 'POST') return jsonResponse({ error: 'Method not allowed' }, 405)
+
+  const auth = await authenticate(req)
+  if ('error' in auth) return jsonResponse({ error: auth.error }, auth.status)
+  const { client: userClient, user } = auth
+
+  // Indexing calls this once per batch of up to 100 chunks, so a big
+  // document naturally costs a few of these — the same monthly quota as
+  // every other AI feature, checked and recorded the same way.
+  const quota = await checkQuota(userClient, user.id)
+  if (!quota.allowed) {
+    return jsonResponse(
+      { error: `You've used all ${quota.limit} AI requests included in the ${quota.planName} plan this month.` },
+      429
+    )
+  }
+
+  const started = performance.now()
 
   try {
     const body = await req.json().catch(() => null)
@@ -68,6 +89,11 @@ serve(async (req) => {
     if (!res.ok) {
       const detail = await res.text()
       const status = res.status === 429 ? 429 : 502
+      await recordUsage(userClient, user.id, {
+        feature: 'embed',
+        durationMs: performance.now() - started,
+        success: false
+      })
       return jsonResponse(
         {
           error:
@@ -86,6 +112,13 @@ serve(async (req) => {
     if (embeddings.length !== texts.length) {
       return jsonResponse({ error: 'Embedding count did not match input count.' }, 502)
     }
+
+    await recordUsage(userClient, user.id, {
+      feature: 'embed',
+      model: EMBEDDING_MODEL,
+      durationMs: performance.now() - started,
+      success: true
+    })
 
     return jsonResponse({ embeddings, model: EMBEDDING_MODEL })
   } catch (err: any) {

@@ -1,7 +1,20 @@
 project_id = "inkwell-study-notebook"
 
+# verify_jwt = false on every function below is intentional, not an
+# oversight: Supabase's own JWT gateway check (verify_jwt = true) would
+# reject an unauthenticated request before it reaches our code, with a
+# generic error body the frontend can't parse the same way as everything
+# else. Instead each function verifies the JWT itself (see
+# functions/_shared/authUsage.ts) and returns the same JSON error shape
+# as every other failure mode. The security property is identical either
+# way — a request without a valid token never runs — this is just about
+# a consistent error contract with the frontend.
+
 [functions.gemini-explain]
 verify_jwt = false
 
 [functions.gemini-embed]
+verify_jwt = false
+
+[functions.delete-account]
 verify_jwt = false

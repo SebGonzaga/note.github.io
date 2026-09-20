@@ -41,6 +41,39 @@ export async function getPageText(pdfDoc, pageNumber) {
   return content.items.map((i) => i.str).join(' ').replace(/\s+/g, ' ').trim()
 }
 
+// Builds a representative sample of an entire document's text, used for
+// "whole document" quiz generation (spec §28) where sending every page
+// would blow past the context cap. Rather than just grabbing the first N
+// pages (which would bias a quiz toward the introduction), this spreads
+// its sampling evenly across the document — every ~kth page — so a quiz
+// over "the whole PDF" has a chance of touching material from throughout
+// it, not just the start. Best-effort, not exhaustive: a very long
+// document still only gets a sample, not full coverage. If the document is
+// indexed (Phase 6 RAG), a future pass could sample from chunk embeddings
+// for better spread instead — noted as a follow-up, not done here.
+const SAMPLE_MAX_PAGES = 25
+const SAMPLE_CHARS_PER_PAGE = 1200
+const SAMPLE_MAX_CHARS = 16000
+
+export async function getDocumentSampleText(pdfDoc) {
+  const total = pdfDoc.numPages
+  const step = Math.max(1, Math.ceil(total / SAMPLE_MAX_PAGES))
+  const pages = []
+  for (let p = 1; p <= total; p += step) pages.push(p)
+
+  const sections = []
+  let charsUsed = 0
+  for (const p of pages) {
+    if (charsUsed >= SAMPLE_MAX_CHARS) break
+    const text = await getPageText(pdfDoc, p)
+    if (!text) continue
+    const snippet = text.slice(0, SAMPLE_CHARS_PER_PAGE)
+    sections.push(`[page ${p}] ${snippet}`)
+    charsUsed += snippet.length
+  }
+  return { text: sections.join('\n\n'), pagesSampled: pages.length }
+}
+
 // Pulls the passage surrounding the selection out of the full page text, so
 // the model sees the sentence the term sits in rather than a page dump.
 //
