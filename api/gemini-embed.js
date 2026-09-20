@@ -13,7 +13,13 @@
 
 import { checkRateLimit } from './_shared/rateLimit.js'
 
-const EMBEDDING_MODEL = 'text-embedding-004'
+// text-embedding-004 was shut down (January 2026). Override with
+// GEMINI_EMBEDDING_MODEL if Google retires this one too. NOTE: vectors from
+// different embedding models can't be compared, so documents indexed with an
+// older model must be re-indexed after changing this.
+const EMBEDDING_MODEL = process.env.GEMINI_EMBEDDING_MODEL || 'gemini-embedding-001'
+// Keep vectors compact (the old model used 768) — they're stored in the browser.
+const EMBEDDING_DIMENSIONS = Number(process.env.GEMINI_EMBEDDING_DIMENSIONS) || 768
 const EMBED_URL = `https://generativelanguage.googleapis.com/v1beta/models/${EMBEDDING_MODEL}:batchEmbedContents`
 
 // Gemini's batchEmbedContents caps requests per call; chunking client-side
@@ -59,6 +65,7 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         requests: texts.map((text) => ({
           model: `models/${EMBEDDING_MODEL}`,
+          outputDimensionality: EMBEDDING_DIMENSIONS,
           content: { parts: [{ text: text.slice(0, MAX_TEXT_CHARS) }] }
         }))
       })
@@ -66,6 +73,7 @@ export default async function handler(req, res) {
 
     if (!geminiRes.ok) {
       const detail = await geminiRes.text()
+      console.error(`gemini-embed: ${EMBEDDING_MODEL} returned ${geminiRes.status}: ${detail.slice(0, 500)}`)
       const status = geminiRes.status === 429 ? 429 : 502
       return res.status(status).json({
         error:

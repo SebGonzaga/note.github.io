@@ -12,7 +12,12 @@
 
 import { checkRateLimit } from './_shared/rateLimit.js'
 
-const GEMINI_MODEL = 'gemini-2.0-flash'
+// The model is read from the GEMINI_MODEL environment variable so that when
+// Google retires a model (gemini-2.0-flash shut down in 2026) you fix it in
+// the Vercel dashboard and redeploy — no code change. The default is the
+// replacement Google named in its shutdown notice; check
+// https://ai.google.dev/gemini-api/docs/models for what your key can use.
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash'
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`
 
 // The client sends a cropped image of a few words, usually well under
@@ -95,11 +100,16 @@ export default async function handler(req, res) {
 
     if (!geminiRes.ok) {
       const status = geminiRes.status === 429 ? 429 : 502
+      // Log Google's actual reason (retired model, bad key, blocked region…)
+      // so it shows up in the Vercel function logs instead of a bare 502.
+      const detail = (await geminiRes.text().catch(() => '')).slice(0, 500)
+      console.error(`gemini-transcribe: ${GEMINI_MODEL} returned ${geminiRes.status}: ${detail}`)
       return res.status(status).json({
         error:
           status === 429
             ? 'The AI service is rate limited right now. Please try again shortly.'
-            : 'The AI service could not be reached.'
+            : 'The AI service could not be reached.',
+        detail: `Gemini ${geminiRes.status}: ${detail}`
       })
     }
 

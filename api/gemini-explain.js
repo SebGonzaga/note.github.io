@@ -15,7 +15,12 @@
 
 import { checkRateLimit } from './_shared/rateLimit.js'
 
-const GEMINI_MODEL = 'gemini-2.0-flash'
+// The model is read from the GEMINI_MODEL environment variable so that when
+// Google retires a model (gemini-2.0-flash shut down in 2026) you fix it in
+// the Vercel dashboard and redeploy — no code change. The default is the
+// replacement Google named in its shutdown notice; check
+// https://ai.google.dev/gemini-api/docs/models for what your key can use.
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash'
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`
 
 // Input caps. These bound both abuse and cost — a single request can't be
@@ -247,6 +252,7 @@ export default async function handler(req, res) {
 
     if (!geminiRes.ok) {
       const detail = await geminiRes.text()
+      console.error(`gemini-explain: ${GEMINI_MODEL} returned ${geminiRes.status}: ${detail.slice(0, 500)}`)
       const status = geminiRes.status === 429 ? 429 : 502
       return res.status(status).json({
         error:

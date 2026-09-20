@@ -504,6 +504,11 @@ comes back as an error in the AI panel itself.
 - **Real vector similarity search** (e.g. pgvector), replacing the
   in-browser cosine-similarity array — only relevant once there's a
   server-side database to hold chunks in.
+- **Model retirement** — Google retires Gemini models on a schedule
+  (`gemini-2.0-flash` and `text-embedding-004` are already shut down). The
+  models are now read from `GEMINI_MODEL` / `GEMINI_EMBEDDING_MODEL` env vars,
+  so a retirement is a dashboard change + redeploy. A 502 from any `/api/gemini-*`
+  route usually means this — the Vercel function log shows Google's reason.
 - **Durable rate limiting** — replacing the in-memory per-IP limiter with
   a KV/Redis-backed one that survives instance recycling, if this app gets
   real traffic.
