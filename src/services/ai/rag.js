@@ -61,9 +61,9 @@ export async function indexDocument({ pdfDoc, documentId, onProgress }) {
     }
 
     // Clear any previous index up front, then append as each batch of
-    // embeddings comes back — if quota runs out partway through a long
-    // document, the batches that already succeeded (and already cost a
-    // request) are kept in storage rather than thrown away.
+    // embeddings comes back — if a request fails partway through a long
+    // document (e.g. hitting the rate limit), the batches that already
+    // succeeded are kept in storage rather than thrown away.
     await docStore.replaceDocumentChunks(documentId, [])
 
     await embedTexts(
@@ -96,7 +96,7 @@ export async function indexDocument({ pdfDoc, documentId, onProgress }) {
     return { chunkCount: saved }
   } catch (err) {
     // A partial index (some batches succeeded before the error — most
-    // likely running out of monthly quota partway through a long document)
+    // likely hitting the rate limit partway through a long document)
     // is still useful for retrieval, so it's kept and marked ready rather
     // than discarded. Only report failure (and only then throw) when
     // nothing was saved at all; a partial result resolves normally with a

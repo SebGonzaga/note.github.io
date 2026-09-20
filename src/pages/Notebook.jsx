@@ -18,6 +18,7 @@ import Toolbar from '../components/toolbar/Toolbar.jsx'
 import DrawingCanvas, { PAGE_WIDTH, PAGE_HEIGHT } from '../components/canvas/DrawingCanvas.jsx'
 import ElementsLayer from '../components/canvas/ElementsLayer.jsx'
 import { useHistory } from '../hooks/useHistory.js'
+import { useNeatWriting } from '../hooks/useNeatWriting.js'
 import { TOOL_DEFAULTS } from '../utils/toolDefaults.js'
 
 const TEMPLATES = [
@@ -53,6 +54,7 @@ export default function NotebookPage() {
   const canvasApiRef = useRef(null)
   const elementsApiRef = useRef(null)
 
+  const [neat, updateNeat] = useNeatWriting()
   const history = useHistory([])
   const historyRef = useRef(history)
   historyRef.current = history
@@ -346,6 +348,8 @@ export default function NotebookPage() {
             elementsApiRef.current?.deleteSelected()
           }}
           onInsertImage={handleInsertImage}
+          neat={neat}
+          onNeatChange={updateNeat}
         />
 
         <div ref={canvasAreaRef} className="flex-1 overflow-auto bg-paper p-4 sm:p-8">
@@ -371,6 +375,7 @@ export default function NotebookPage() {
                     tool={tool}
                     toolSettings={toolSettingsMap[tool] || {}}
                     onSelectionChange={setStrokeSelectionCount}
+                    neatWriting={neat}
                   />
                   <ElementsLayer
                     ref={elementsApiRef}

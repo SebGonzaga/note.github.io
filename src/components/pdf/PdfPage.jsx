@@ -33,6 +33,7 @@ export default function PdfPage({
   tool,
   toolSettings,
   textDefaults,
+  neatWriting,
   elements,
   onChange,
   onStrokeSelectionChange,
@@ -137,6 +138,7 @@ export default function PdfPage({
             width={size.width}
             height={size.height}
             allowSelect={false}
+            neatWriting={neatWriting}
           />
         </div>
 

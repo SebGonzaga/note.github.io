@@ -13,6 +13,7 @@ import * as ai from '../services/ai/aiService.js'
 import { buildPdfContext, getPageText, getDocumentSampleText, DEFAULT_CONTEXT_MODE } from '../services/ai/context.js'
 import { indexDocument } from '../services/ai/rag.js'
 import { useHistory } from '../hooks/useHistory.js'
+import { useNeatWriting } from '../hooks/useNeatWriting.js'
 import { TOOL_DEFAULTS } from '../utils/toolDefaults.js'
 import * as docStore from '../services/storage/documents.js'
 
@@ -67,6 +68,7 @@ export default function Document() {
   const skipNextSaveRef = useRef(false)
 
   const historyRef = useRef(null)
+  const [neat, updateNeat] = useNeatWriting()
   const history = useHistory([])
   historyRef.current = history
 
@@ -560,6 +562,8 @@ export default function Document() {
           elementsApiRef.current?.deleteSelected()
         }}
         onInsertImage={(src, w, h) => elementsApiRef.current?.addImage(src, w, h)}
+        neat={neat}
+        onNeatChange={updateNeat}
       />
 
       <div className="relative flex flex-1 overflow-hidden">
@@ -599,6 +603,7 @@ export default function Document() {
             tool={tool}
             toolSettings={toolSettingsMap[tool] || {}}
             textDefaults={toolSettingsMap.text}
+            neatWriting={neat}
             elements={history.value}
             onChange={history.commit}
             onStrokeSelectionChange={setStrokeSelectionCount}

@@ -3,7 +3,7 @@ export const TOOL_DEFAULTS = {
   pencil: { color: '#44403c', width: 1.75, opacity: 0.8 },
   highlighter: { color: '#ffd54f', width: 18, opacity: 0.35 },
   eraser: { width: 22 },
-  text: { color: '#1f2933', fontSize: 16, bold: false, italic: false, align: 'left' }
+  text: { color: '#1f2933', fontSize: 16, bold: false, italic: false, align: 'left', font: 'inter' }
 }
 
 export const PALETTE = [

@@ -1,9 +1,32 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
-import { strokeHitByPoint, strokeIntersectsRect, normalizeRect } from '../../utils/strokes.js'
+import {
+  strokeHitByPoint,
+  strokeIntersectsRect,
+  normalizeRect,
+  smoothStroke,
+  strokesBounds,
+  nextFountainWidth,
+  applyFountainWidths
+} from '../../utils/strokes.js'
 import { newId } from '../../services/storage/db.js'
+import { transcribeHandwriting } from '../../services/ai/aiService.js'
+import {
+  MIN_WRITING_SIZE,
+  buildTextElement,
+  renderStrokesToImage
+} from '../../services/ink/neatWriting.js'
 
 export const PAGE_WIDTH = 850
 export const PAGE_HEIGHT = 1100
+
+// "Convert to text" waits this long after the pen lifts before reading the
+// handwriting, so a word or sentence is finished before it's converted.
+const CONVERT_IDLE_MS = 1600
+// Below this, a result is treated as a misread and the ink is kept.
+const MIN_CONFIDENCE = 0.6
+const NOTE_MS = 2600
+
+const DEFAULT_NEAT = { mode: 'off', font: 'inter', penStyle: 'classic' }
 
 // A drawing surface for one page. Renders at a fixed logical resolution
 // (`width` x `height`, defaulting to the notebook page size PAGE_WIDTH x
@@ -12,7 +35,17 @@ export const PAGE_HEIGHT = 1100
 // zooming never triggers a redraw. PDF pages (Phase 4) pass their own
 // per-document base size instead of the defaults.
 const DrawingCanvas = forwardRef(function DrawingCanvas(
-  { elements, onChange, tool, toolSettings, onSelectionChange, width = PAGE_WIDTH, height = PAGE_HEIGHT, allowSelect = true },
+  {
+    elements,
+    onChange,
+    tool,
+    toolSettings,
+    onSelectionChange,
+    width = PAGE_WIDTH,
+    height = PAGE_HEIGHT,
+    allowSelect = true,
+    neatWriting = DEFAULT_NEAT
+  },
   ref
 ) {
   const canvasRef = useRef(null)
@@ -21,6 +54,103 @@ const DrawingCanvas = forwardRef(function DrawingCanvas(
   const erasedIdsRef = useRef(new Set())
   const selectRectRef = useRef(null)
   const [selectedIds, setSelectedIds] = useState(new Set())
+
+  // --- Neat writing (sharpen + convert-to-text) ----------------------------
+  // Conversion is asynchronous, so by the time the AI answers, this render's
+  // `elements`/`onChange` are stale (the parent's commit closes over its own
+  // history index). The ref always holds the latest props from the most
+  // recent render, and is read only *after* every await.
+  const latestRef = useRef(null)
+  latestRef.current = { elements, onChange, neatWriting, width, height }
+  const pendingIdsRef = useRef([]) // strokes written but not yet converted
+  const idleTimerRef = useRef(null)
+  const convertDisabledRef = useRef(false) // set once the AI reports it's unavailable
+  const noteCounterRef = useRef(0)
+  const [notes, setNotes] = useState([]) // [{ key, rect, kind: 'busy' | 'info' | 'error', text }]
+
+  useEffect(() => () => clearTimeout(idleTimerRef.current), [])
+
+  function addNote(rect, kind, text) {
+    const key = ++noteCounterRef.current
+    setNotes((prev) => [...prev, { key, rect, kind, text }])
+    return key
+  }
+  function removeNote(key) {
+    setNotes((prev) => prev.filter((n) => n.key !== key))
+  }
+  function flashNote(rect, kind, text) {
+    const key = addNote(rect, kind, text)
+    setTimeout(() => removeNote(key), NOTE_MS)
+  }
+
+  function scheduleConversion() {
+    clearTimeout(idleTimerRef.current)
+    idleTimerRef.current = setTimeout(runConversion, CONVERT_IDLE_MS)
+  }
+
+  function queueConversion(strokeId) {
+    pendingIdsRef.current.push(strokeId)
+    scheduleConversion()
+  }
+
+  async function runConversion() {
+    const ids = pendingIdsRef.current
+    pendingIdsRef.current = []
+    if (ids.length === 0 || convertDisabledRef.current) return
+
+    const strokes = latestRef.current.elements.filter((el) => el.type === 'stroke' && ids.includes(el.id))
+    // If any of them are gone (erased, undone, or the page changed), the
+    // writing is being edited — leave it alone rather than convert a fragment.
+    if (strokes.length !== ids.length) return
+
+    const box = strokesBounds(strokes)
+    if (box.maxX - box.minX < MIN_WRITING_SIZE && box.maxY - box.minY < MIN_WRITING_SIZE) return
+    const rect = { x: box.minX, y: box.minY, w: box.maxX - box.minX, h: box.maxY - box.minY }
+
+    const busyKey = addNote(rect, 'busy', 'Reading…')
+    try {
+      const result = await transcribeHandwriting(renderStrokesToImage(strokes))
+
+      if (!result?.isText || !result.text || (result.confidence ?? 0) < MIN_CONFIDENCE) {
+        flashNote(rect, 'info', 'Kept as handwriting')
+        return
+      }
+
+      const textEl = await buildTextElement({
+        strokes,
+        text: result.text,
+        font: latestRef.current.neatWriting.font,
+        pageWidth: latestRef.current.width,
+        pageHeight: latestRef.current.height
+      })
+
+      // Re-read after the awaits: only swap if every stroke is still there.
+      const latest = latestRef.current
+      if (!ids.every((id) => latest.elements.some((el) => el.id === id))) return
+      latest.onChange([...latest.elements.filter((el) => !ids.includes(el.id)), textEl])
+    } catch (err) {
+      if (err?.code === 'not_configured') {
+        convertDisabledRef.current = true
+        flashNote(rect, 'error', 'Text conversion isn’t set up — kept your ink')
+      } else if (err?.code === 'quota_exceeded') {
+        flashNote(rect, 'error', 'Too many conversions — kept your ink')
+      } else {
+        flashNote(rect, 'error', 'Couldn’t read that — kept your ink')
+      }
+    } finally {
+      removeNote(busyKey)
+    }
+  }
+
+  // Turning conversion back on (or off) gets a clean slate.
+  useEffect(() => {
+    if (neatWriting.mode !== 'type') {
+      clearTimeout(idleTimerRef.current)
+      pendingIdsRef.current = []
+    } else {
+      convertDisabledRef.current = false
+    }
+  }, [neatWriting.mode])
 
   // Reset selection whenever the tool changes away from "select".
   useEffect(() => {
@@ -64,7 +194,12 @@ const DrawingCanvas = forwardRef(function DrawingCanvas(
         const p1 = pts[i]
         const p2 = pts[i + 1]
         const pressure = ((p1.pressure ?? 0.5) + (p2.pressure ?? 0.5)) / 2
-        ctx.lineWidth = stroke.width * (0.5 + pressure)
+        // Fountain strokes carry a precomputed width per point; everything
+        // else (and every stroke drawn before this existed) uses pressure.
+        ctx.lineWidth =
+          stroke.style === 'fountain' && p1.w != null && p2.w != null
+            ? (p1.w + p2.w) / 2
+            : stroke.width * (0.5 + pressure)
         ctx.beginPath()
         ctx.moveTo(p1.x, p1.y)
         ctx.lineTo(p2.x, p2.y)
@@ -128,7 +263,7 @@ const DrawingCanvas = forwardRef(function DrawingCanvas(
     const rect = canvasRef.current.getBoundingClientRect()
     const x = ((e.clientX - rect.left) / rect.width) * width
     const y = ((e.clientY - rect.top) / rect.height) * height
-    return { x, y, pressure: e.pressure > 0 ? e.pressure : 0.5 }
+    return { x, y, pressure: e.pressure > 0 ? e.pressure : 0.5, t: Math.round(e.timeStamp) }
   }
 
   function handlePointerDown(e) {
@@ -136,6 +271,8 @@ const DrawingCanvas = forwardRef(function DrawingCanvas(
     e.currentTarget.setPointerCapture(e.pointerId)
 
     if (tool === 'pen' || tool === 'pencil' || tool === 'highlighter') {
+      // Still writing — hold off on converting until the pen has rested.
+      clearTimeout(idleTimerRef.current)
       drawingRef.current = {
         id: newId('el'),
         type: 'stroke',
@@ -143,7 +280,13 @@ const DrawingCanvas = forwardRef(function DrawingCanvas(
         color: toolSettings.color,
         width: toolSettings.width,
         opacity: toolSettings.opacity,
+        // Fountain-pen width applies to the pen only; pencil and highlighter
+        // keep their own look.
+        ...(tool === 'pen' && neatWriting.penStyle === 'fountain' ? { style: 'fountain' } : {}),
         points: [point]
+      }
+      if (drawingRef.current.style === 'fountain') {
+        point.w = nextFountainWidth(null, toolSettings.width, point.pressure, NaN)
       }
     } else if (tool === 'eraser') {
       erasedIdsRef.current = new Set()
@@ -159,6 +302,13 @@ const DrawingCanvas = forwardRef(function DrawingCanvas(
     const point = toPagePoint(e)
 
     if (drawingRef.current) {
+      const live = drawingRef.current
+      if (live.style === 'fountain') {
+        const prev = live.points[live.points.length - 1]
+        const dt = point.t - prev.t
+        const speed = dt > 0 ? Math.hypot(point.x - prev.x, point.y - prev.y) / dt : NaN
+        point.w = nextFountainWidth(prev.w, live.width, point.pressure, speed)
+      }
       drawingRef.current.points.push(point)
       // Incremental draw for responsive feedback without a full redraw.
       const ctx = canvasRef.current.getContext('2d')
@@ -177,10 +327,22 @@ const DrawingCanvas = forwardRef(function DrawingCanvas(
 
   function handlePointerUp() {
     if (drawingRef.current) {
-      const finished = drawingRef.current
+      let finished = drawingRef.current
       drawingRef.current = null
       if (finished.points.length > 0) {
+        const isWriting = finished.tool === 'pen' || finished.tool === 'pencil'
+        if (isWriting && neatWriting.mode !== 'off') {
+          finished = { ...finished, points: smoothStroke(finished.points) }
+        }
+        if (finished.style === 'fountain') {
+          // Final pass over the (possibly smoothed) points: consistent
+          // widths plus a pointed start and finish.
+          finished = { ...finished, points: applyFountainWidths(finished.points, finished.width) }
+        }
         onChange([...elements, finished])
+        if (isWriting && neatWriting.mode === 'type') queueConversion(finished.id)
+      } else if (neatWriting.mode === 'type' && pendingIdsRef.current.length > 0) {
+        scheduleConversion() // the pen-down cleared the timer; restart it
       }
     } else if (tool === 'eraser' && erasedIdsRef.current.size > 0) {
       const next = elements.filter((el) => !erasedIdsRef.current.has(el.id))
@@ -271,6 +433,27 @@ const DrawingCanvas = forwardRef(function DrawingCanvas(
         style={{ width, height }}
         className="pointer-events-none absolute inset-0"
       />
+      {notes.map((n) => (
+        <div
+          key={n.key}
+          role="status"
+          className="pointer-events-none absolute"
+          style={{ left: n.rect.x - 4, top: n.rect.y - 4, width: n.rect.w + 8, height: n.rect.h + 8 }}
+        >
+          <div
+            className={`h-full w-full rounded border border-dashed ${
+              n.kind === 'error' ? 'border-red-400' : 'border-accent'
+            } ${n.kind === 'busy' ? 'animate-pulse' : ''}`}
+          />
+          <span
+            className={`absolute left-0 top-full mt-1 whitespace-nowrap rounded px-1.5 py-0.5 text-xs text-white ${
+              n.kind === 'error' ? 'bg-red-500' : 'bg-accent'
+            }`}
+          >
+            {n.text}
+          </span>
+        </div>
+      ))}
     </div>
   )
 })

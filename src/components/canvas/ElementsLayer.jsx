@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { newId } from '../../services/storage/db.js'
+import { DEFAULT_FONT_ID, fontFamilyFor } from '../../utils/fonts.js'
 
 const MIN_TEXT_WIDTH = 80
 const MIN_TEXT_HEIGHT = 32
@@ -103,7 +104,8 @@ const ElementsLayer = forwardRef(function ElementsLayer(
       color: textDefaults?.color ?? '#1f2933',
       bold: !!textDefaults?.bold,
       italic: !!textDefaults?.italic,
-      align: textDefaults?.align ?? 'left'
+      align: textDefaults?.align ?? 'left',
+      font: textDefaults?.font ?? DEFAULT_FONT_ID
     }
     onChange([...elements, el])
     setSelectedIds(new Set([el.id]))
@@ -265,7 +267,7 @@ const ElementsLayer = forwardRef(function ElementsLayer(
                     borderRadius: 4,
                     padding: 4,
                     outline: 'none',
-                    fontFamily: 'inherit'
+                    fontFamily: fontFamilyFor(el.font)
                   }}
                 />
               ) : (
@@ -281,6 +283,7 @@ const ElementsLayer = forwardRef(function ElementsLayer(
                     whiteSpace: 'pre-wrap',
                     overflow: 'hidden',
                     padding: 4,
+                    fontFamily: fontFamilyFor(el.font),
                     cursor: tool === 'select' ? 'move' : 'default'
                   }}
                 >

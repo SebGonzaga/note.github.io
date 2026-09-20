@@ -25,8 +25,11 @@ function getIp(req) {
   return req.socket?.remoteAddress || 'unknown'
 }
 
-export function checkRateLimit(req) {
-  const ip = getIp(req)
+// `scope` keeps independent counters for independent features, so e.g. a
+// day of auto-converting handwriting can't use up the explain/quiz budget
+// (or the reverse). Each scope can also set its own limits.
+export function checkRateLimit(req, { scope = 'ai', burstMax = BURST_MAX, dayMax = DAY_MAX } = {}) {
+  const ip = `${scope}:${getIp(req)}`
   const now = Date.now()
   let bucket = buckets.get(ip)
   if (!bucket) {
@@ -40,10 +43,10 @@ export function checkRateLimit(req) {
 
   bucket.burst = bucket.burst.filter((t) => now - t < BURST_WINDOW_MS)
 
-  if (bucket.burst.length >= BURST_MAX) {
+  if (bucket.burst.length >= burstMax) {
     return { allowed: false, reason: 'Too many requests in a short time. Wait a few seconds and try again.' }
   }
-  if (bucket.day.count >= DAY_MAX) {
+  if (bucket.day.count >= dayMax) {
     return { allowed: false, reason: 'Daily AI request limit reached for this connection. Try again tomorrow.' }
   }
 

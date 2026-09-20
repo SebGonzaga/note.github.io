@@ -12,6 +12,7 @@
 // the AI features (this file + rag.js/embeddings.js) make network calls.
 
 const AI_EXPLAIN_ENDPOINT = '/api/gemini-explain'
+const AI_TRANSCRIBE_ENDPOINT = '/api/gemini-transcribe'
 
 export class AiError extends Error {
   constructor(message, { code } = {}) {
@@ -21,10 +22,10 @@ export class AiError extends Error {
   }
 }
 
-async function callFunction(payload) {
+async function callFunction(payload, endpoint = AI_EXPLAIN_ENDPOINT) {
   let response
   try {
-    response = await fetch(AI_EXPLAIN_ENDPOINT, {
+    response = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -78,4 +79,10 @@ export function generateFlashcards(request, count = 5) {
 
 export function generateQuiz(request, { count = 10, questionTypes } = {}) {
   return callFunction({ ...request, mode: 'quiz', count, questionTypes })
+}
+
+// Reads handwriting from a PNG data URL of the strokes. Resolves to
+// { isText, text, confidence }. Used by the canvas's "convert to text" mode.
+export function transcribeHandwriting(image) {
+  return callFunction({ image }, AI_TRANSCRIBE_ENDPOINT)
 }

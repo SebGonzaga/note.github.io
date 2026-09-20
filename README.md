@@ -111,6 +111,47 @@ Vercel CLI's `vercel dev`, which serves both the Vite frontend and the
   (metadata + storage path) if cloud sync is ever added, to keep the local
   database size and sync payloads reasonable for photo-heavy notebooks.
 
+**Neat writing — sharpen ink & convert handwriting to type**
+- A wand control in the toolbar (shown with the Pen and Pencil) has three
+  modes, remembered across notebooks and PDFs:
+  - **Off** — ink is kept exactly as drawn.
+  - **Sharpen ink** *(default)* — when you lift the pen, the stroke is
+    cleaned up: near-duplicate points dropped, hand tremor relaxed, corners
+    rounded. Fully offline and instant; the stroke's start and end points
+    never move.
+  - **Convert to text** — everything in *Sharpen*, plus: after ~1.6 s with the
+    pen up, the strokes you just wrote are rendered to a small black-on-white
+    image, read by Gemini (`/api/gemini-transcribe`), and replaced with a
+    typed text box in the font you pick (Clean, Serif, Neat print, Script),
+    sized to match your handwriting and placed where it was. It's one undo
+    step — **Undo brings the ink back**.
+- It's deliberately conservative: drawings, diagrams, arrows, and maths
+  notation are left as ink (the model is told to decline them), results below
+  0.6 confidence are ignored, and it transcribes exactly what you wrote —
+  spelling included — rather than "fixing" it. If anything goes wrong
+  (offline, no key, rate limited) your ink stays and a small note says why.
+  Highlighter strokes are never converted.
+- Needs `GEMINI_API_KEY` like the other AI features; without it the mode just
+  reports "isn't set up" and everything else keeps working. It has its own
+  rate-limit bucket (4 per 10 s, 300 per day per IP) so writing all day can't
+  use up the explain/quiz budget.
+- **Fountain pen** *(default for the Pen tool)* — a separate "Pen" control
+  switches between Fountain and Classic. With Fountain, line width follows how
+  fast you write: thinner on quick strokes, fuller when you slow down, with a
+  pointed start and finish; real stylus pressure still counts on top. It uses
+  the timestamps captured with each point (`t`, ms), works in every browser
+  with no AI, and is independent of the Off/Sharpen/Convert setting. Each
+  stroke remembers its own style (`style: 'fountain'`, per-point width `w`), so
+  switching styles never changes ink you've already written. Pencil and
+  highlighter are unchanged.
+- The Text tool also gained a **typeface** picker (same four fonts). Text
+  boxes made before this had no font and look exactly as they did.
+- **Known simplifications:** converted text is a normal text box, so it isn't
+  re-flowed if you later resize it beyond its width; a long pause mid-sentence
+  converts what's written so far (raise `CONVERT_IDLE_MS` in
+  `DrawingCanvas.jsx` if that's too eager); the Neat print/Script fonts load
+  from Google Fonts, so offline they fall back to a system font.
+
 **Phase 4 — PDF study system**
 - **Documents library** at `/documents`: upload by button or drag-and-drop,
   with rename / favorite / delete. Uploads are validated for file type and
@@ -472,7 +513,7 @@ comes back as an error in the AI panel itself.
   not just PDFs — the generation plumbing is already mode-agnostic on the
   server; it just needs a notebook-side context builder analogous to
   `buildPdfContext`.
-- OCR, production hardening, and anything else that doesn't depend on
+- OCR of *scanned PDFs*, production hardening, and anything else that doesn't depend on
   reintroducing a backend.
 
 ## Project structure
@@ -515,14 +556,15 @@ api/
   gemini-explain.js   explain/simplify/inContext/notes/translate/
                        flashcards/quiz — holds GEMINI_API_KEY, no accounts
   gemini-embed.js     batch embeddings for indexing — same pattern
-  _shared/rateLimit.js   best-effort per-IP rate limiting, shared by both
+  gemini-transcribe.js  handwriting image → text for "Convert to text" — same pattern
+  _shared/rateLimit.js   best-effort per-IP rate limiting, shared (per-feature buckets)
 ```
 
 The data model matches the spec: `Notebook { id, title, folderId, createdAt,
 updatedAt, favorite }`, `Page { id, notebookId, title, background, elements }`.
 `elements` is a single array holding three element types today:
-- Stroke: `{ id, type: 'stroke', tool, color, width, opacity, points: [{ x, y, pressure }] }`
-- Text: `{ id, type: 'text', x, y, width, height, text, fontSize, color, bold, italic, align }`
+- Stroke: `{ id, type: 'stroke', tool, color, width, opacity, points: [{ x, y, pressure }] }` (newer strokes may also have `style: 'fountain'`, and points a timestamp `t` and width `w`; all optional)
+- Text: `{ id, type: 'text', x, y, width, height, text, fontSize, color, bold, italic, align, font }` (`font` is optional — one of `inter | serif | print | script`; missing means the app default)
 - Image: `{ id, type: 'image', x, y, width, height, src }` (`src` is a base64 data URL for now — see Phase 3 notes above)
 
 - Highlight: `{ id, type: 'highlight', color, text, rects: [{ x, y, width, height }] }` (PDF pages only)

@@ -14,9 +14,11 @@ import {
   AlignRight,
   Undo2,
   Redo2,
-  Trash2
+  Trash2,
+  Wand2
 } from 'lucide-react'
 import { PALETTE } from '../../utils/toolDefaults.js'
+import { FONT_OPTIONS } from '../../utils/fonts.js'
 
 const TOOLS = [
   { id: 'select', label: 'Select', icon: MousePointer2 },
@@ -26,6 +28,15 @@ const TOOLS = [
   { id: 'eraser', label: 'Eraser', icon: Eraser },
   { id: 'text', label: 'Text box', icon: Type }
 ]
+
+const NEAT_MODES = [
+  { id: 'off', label: 'Off' },
+  { id: 'sharpen', label: 'Sharpen ink' },
+  { id: 'type', label: 'Convert to text' }
+]
+
+const selectClass =
+  'rounded-card border border-border bg-surface px-1.5 py-1 text-xs text-ink focus:border-accent'
 
 const ALIGN_OPTIONS = [
   { id: 'left', icon: AlignLeft },
@@ -44,7 +55,9 @@ export default function Toolbar({
   canRedo,
   selectionCount,
   onDeleteSelection,
-  onInsertImage
+  onInsertImage,
+  neat,
+  onNeatChange
 }) {
   const fileInputRef = useRef(null)
 
@@ -52,6 +65,7 @@ export default function Toolbar({
   const showWidth = tool === 'pen' || tool === 'pencil' || tool === 'highlighter' || tool === 'eraser'
   const showOpacity = tool === 'pen' || tool === 'pencil'
   const showTextSettings = tool === 'text'
+  const showNeat = !!neat && (tool === 'pen' || tool === 'pencil')
 
   function handleFileChange(e) {
     const file = e.target.files?.[0]
@@ -107,6 +121,61 @@ export default function Toolbar({
           className="hidden"
         />
       </div>
+
+      {showNeat && (
+        <div className="flex shrink-0 items-center gap-2 border-l border-border pl-3 text-xs text-muted">
+          <Wand2 size={14} aria-hidden="true" />
+          <select
+            aria-label="Neat writing"
+            title={
+              neat.mode === 'type'
+                ? 'When you pause, your handwriting is read by AI and replaced with typed text. Needs the AI service.'
+                : neat.mode === 'sharpen'
+                ? 'Smooths wobbly lines as you write. Works offline.'
+                : 'Ink is kept exactly as you draw it.'
+            }
+            value={neat.mode}
+            onChange={(e) => onNeatChange({ mode: e.target.value })}
+            className={selectClass}
+          >
+            {NEAT_MODES.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+          {neat.mode === 'type' && (
+            <select
+              aria-label="Font for converted text"
+              value={neat.font}
+              onChange={(e) => onNeatChange({ font: e.target.value })}
+              className={selectClass}
+            >
+              {FONT_OPTIONS.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.label}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+      )}
+
+      {neat && tool === 'pen' && (
+        <label className="flex shrink-0 items-center gap-2 border-l border-border pl-3 text-xs text-muted">
+          Pen
+          <select
+            aria-label="Pen style"
+            title="Fountain: lines get thinner when you write fast and fuller when you slow down. Classic: even width."
+            value={neat.penStyle}
+            onChange={(e) => onNeatChange({ penStyle: e.target.value })}
+            className={selectClass}
+          >
+            <option value="fountain">Fountain</option>
+            <option value="classic">Classic</option>
+          </select>
+        </label>
+      )}
 
       {showColor && (
         <div className="flex shrink-0 items-center gap-1.5 border-l border-border pl-3">
@@ -164,7 +233,7 @@ export default function Toolbar({
       {showTextSettings && (
         <>
           <label className="flex shrink-0 items-center gap-2 border-l border-border pl-3 text-xs text-muted">
-            Font
+            Size
             <input
               type="range"
               min="10"
@@ -175,6 +244,19 @@ export default function Toolbar({
               className="w-20 accent-accent"
             />
           </label>
+
+          <select
+            aria-label="Typeface"
+            value={settings.font || 'inter'}
+            onChange={(e) => updateSettings({ font: e.target.value })}
+            className={`${selectClass} shrink-0`}
+          >
+            {FONT_OPTIONS.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.label}
+              </option>
+            ))}
+          </select>
 
           <div className="flex shrink-0 items-center gap-1 border-l border-border pl-3">
             <button
