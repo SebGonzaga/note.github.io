@@ -53,11 +53,11 @@ export function openDB() {
         const annotations = db.createObjectStore(STORES.pdfAnnotations, { keyPath: 'id' })
         annotations.createIndex('documentId', 'documentId', { unique: false })
       }
-      // Phase 6 — RAG + flashcards. One row per chunk (per document+page),
-      // holding its text and embedding vector — this is the client-side
-      // stand-in for the spec's `document_chunks` + pgvector table, until
-      // Phase 7 moves storage to Supabase Postgres. Flashcards reference
-      // their source document/page the same way annotations do.
+      // RAG + flashcards. One row per chunk (per document+page), holding
+      // its text and embedding vector — the client-side stand-in for a
+      // real pgvector table, staying entirely in IndexedDB since there's
+      // no backend database in this build. Flashcards reference their
+      // source document/page the same way annotations do.
       if (!db.objectStoreNames.contains(STORES.documentChunks)) {
         const chunks = db.createObjectStore(STORES.documentChunks, { keyPath: 'id' })
         chunks.createIndex('documentId', 'documentId', { unique: false })

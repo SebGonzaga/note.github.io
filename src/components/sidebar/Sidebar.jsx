@@ -1,8 +1,7 @@
-import { Link, NavLink, useLocation } from 'react-router-dom'
-import { BookOpen, Clock, Star, Settings, FolderClosed, NotebookText, FileText, Layers, ListChecks, UserCircle2, LogIn } from 'lucide-react'
+import { NavLink } from 'react-router-dom'
+import { BookOpen, Clock, Star, Settings, FolderClosed, NotebookText, FileText, Layers, ListChecks } from 'lucide-react'
 
-export default function Sidebar({ folders, notebooks, documents = [], auth }) {
-  const location = useLocation()
+export default function Sidebar({ folders, notebooks, documents = [] }) {
   const linkClass = ({ isActive }) =>
     `flex items-center gap-2 rounded-card px-3 py-2 text-sm font-medium transition-colors ${
       isActive ? 'bg-accent-soft text-ink' : 'text-muted hover:bg-accent-soft hover:text-ink'
@@ -88,23 +87,6 @@ export default function Sidebar({ folders, notebooks, documents = [], auth }) {
           <Settings size={16} />
           Settings
         </NavLink>
-
-        {!auth?.loading &&
-          (auth?.isSignedIn ? (
-            <NavLink to="/settings" className={linkClass}>
-              <UserCircle2 size={16} />
-              <span className="truncate">{auth.user.email}</span>
-            </NavLink>
-          ) : (
-            <Link
-              to="/login"
-              state={{ from: location.pathname }}
-              className="flex items-center gap-2 rounded-card px-3 py-2 text-sm font-medium text-accent hover:bg-accent-soft"
-            >
-              <LogIn size={16} />
-              Sign in for AI features
-            </Link>
-          ))}
       </div>
     </aside>
   )

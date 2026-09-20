@@ -12,7 +12,6 @@ import { loadPdf } from '../services/pdf/pdfjs.js'
 import * as ai from '../services/ai/aiService.js'
 import { buildPdfContext, getPageText, getDocumentSampleText, DEFAULT_CONTEXT_MODE } from '../services/ai/context.js'
 import { indexDocument } from '../services/ai/rag.js'
-import { getUsage } from '../services/ai/serverUsage.js'
 import { useHistory } from '../hooks/useHistory.js'
 import { TOOL_DEFAULTS } from '../utils/toolDefaults.js'
 import * as docStore from '../services/storage/documents.js'
@@ -45,8 +44,6 @@ export default function Document() {
   // (a follow-up is the same selection and context with a question added).
   const [aiState, setAiState] = useState(null) // { status, mode, selectedText, result, error }
   const [contextMode, setContextMode] = useState(DEFAULT_CONTEXT_MODE)
-  const [usage, setUsage] = useState(null)
-  const refreshUsage = () => getUsage().then(setUsage)
   const [indexProgress, setIndexProgress] = useState(null) // { done, total }
   const [indexStatus, setIndexStatus] = useState('none') // 'none' | 'indexing' | 'ready' | 'error'
   const [chunkCount, setChunkCount] = useState(0)
@@ -72,11 +69,6 @@ export default function Document() {
   const historyRef = useRef(null)
   const history = useHistory([])
   historyRef.current = history
-
-  useEffect(() => {
-    refreshUsage()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   // --- Load document + PDF ------------------------------------------------
 
@@ -305,8 +297,6 @@ export default function Document() {
           error: err?.message || 'Something went wrong.',
           errorCode: err?.code
         })
-      } finally {
-        refreshUsage()
       }
     },
     [pdfDoc, doc, pageNumber, contextMode, indexStatus]
@@ -405,7 +395,6 @@ export default function Document() {
         contextMode: scope
       }
       const result = await ai.generateQuiz(request, { count, questionTypes })
-      refreshUsage()
 
       if (result.questions.length === 0) {
         setQuizGenError("Couldn't generate quiz questions from that material — try a different page or scope.")
@@ -427,7 +416,6 @@ export default function Document() {
     } catch (err) {
       setQuizGenError(err?.message || 'Something went wrong generating the quiz.')
       setQuizGenErrorCode(err?.code)
-      refreshUsage()
     } finally {
       setQuizGenerating(false)
     }
@@ -633,7 +621,6 @@ export default function Document() {
             state={aiState}
             contextMode={contextMode}
             setContextMode={setContextMode}
-            usage={usage}
             onClose={() => setAiState(null)}
             onFollowUp={handleFollowUp}
             onRetry={aiState.status === 'error' ? handleRetry : null}

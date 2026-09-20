@@ -1,69 +1,16 @@
-import { useEffect, useState } from 'react'
-import { useOutletContext, useNavigate, Link } from 'react-router-dom'
-import {
-  Sun,
-  Moon,
-  CheckCircle2,
-  AlertCircle,
-  LogOut,
-  Trash2,
-  Loader2,
-  RefreshCw,
-  Download,
-  Upload
-} from 'lucide-react'
+import { useState } from 'react'
+import { useOutletContext } from 'react-router-dom'
+import { Sun, Moon, CheckCircle2, Download, Upload, Loader2 } from 'lucide-react'
 import Button from '../components/common/Button.jsx'
-import Modal from '../components/common/Modal.jsx'
-import { isAiConfigured } from '../services/ai/aiService.js'
-import { getUsage } from '../services/ai/serverUsage.js'
-import { signOut, deleteAccount } from '../services/auth/authService.js'
 import { exportBackup, downloadBackup, importBackup, BackupError } from '../services/storage/backup.js'
 
 export default function Settings() {
-  const { theme, toggleTheme, notebooks, documents, auth, refresh, refreshDocuments } =
-    useOutletContext()
-  const navigate = useNavigate()
-  const [usage, setUsage] = useState(null)
-  const [usageLoading, setUsageLoading] = useState(false)
-  const [confirmingDelete, setConfirmingDelete] = useState(false)
-  const [deleting, setDeleting] = useState(false)
-  const [deleteError, setDeleteError] = useState(null)
+  const { theme, toggleTheme, notebooks, documents, refresh, refreshDocuments } = useOutletContext()
   const [exportState, setExportState] = useState({ busy: false, stage: null, error: null })
   const [importState, setImportState] = useState({ busy: false, stage: null, error: null, result: null })
 
   const totalPages = notebooks?.length ?? 0
   const totalDocs = documents?.length ?? 0
-  const configured = isAiConfigured()
-
-  function loadUsage() {
-    if (!auth?.isSignedIn) return
-    setUsageLoading(true)
-    getUsage()
-      .then(setUsage)
-      .finally(() => setUsageLoading(false))
-  }
-
-  useEffect(() => {
-    loadUsage()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auth?.isSignedIn])
-
-  async function handleSignOut() {
-    await signOut()
-    navigate('/')
-  }
-
-  async function handleDeleteAccount() {
-    setDeleting(true)
-    setDeleteError(null)
-    try {
-      await deleteAccount()
-      navigate('/')
-    } catch (err) {
-      setDeleteError(err.message)
-      setDeleting(false)
-    }
-  }
 
   async function handleExport() {
     setExportState({ busy: true, stage: 'reading', error: null })
@@ -122,78 +69,23 @@ export default function Settings() {
 
       <section className="mb-8 rounded-card border border-border bg-surface p-5">
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">
-          Account
-        </h2>
-
-        {auth?.loading ? (
-          <p className="text-sm text-muted">Loading…</p>
-        ) : auth?.isSignedIn ? (
-          <>
-            <div className="mb-4 flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium">{auth.user.email}</p>
-                <p className="text-xs text-muted">Signed in</p>
-              </div>
-              <Button variant="outline" size="sm" onClick={handleSignOut}>
-                <LogOut size={14} /> Sign out
-              </Button>
-            </div>
-
-            <div className="border-t border-border pt-3">
-              <p className="mb-2 text-xs text-muted">
-                Deleting your account removes your profile and AI usage history immediately.
-                Notebooks, PDFs, and annotations currently live only in this browser's storage
-                (see the Storage section below) and aren't touched by this — cloud sync for that
-                data is coming in a later phase.
-              </p>
-              <Button
-                variant="danger"
-                size="sm"
-                onClick={() => {
-                  setConfirmingDelete(true)
-                  setDeleteError(null)
-                }}
-              >
-                <Trash2 size={14} /> Delete account
-              </Button>
-            </div>
-          </>
-        ) : (
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-muted">
-              Sign in to use AI features and, eventually, sync across devices.
-            </p>
-            <div className="flex shrink-0 gap-2">
-              <Link to="/login">
-                <Button variant="outline" size="sm">
-                  Sign in
-                </Button>
-              </Link>
-              <Link to="/signup">
-                <Button size="sm">Sign up</Button>
-              </Link>
-            </div>
-          </div>
-        )}
-      </section>
-
-      <section className="mb-8 rounded-card border border-border bg-surface p-5">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">
           Storage
         </h2>
         <p className="text-sm text-muted">
           Notebooks, PDFs, and annotations are stored locally in this browser's IndexedDB —{' '}
           {totalPages} notebook{totalPages === 1 ? '' : 's'} and {totalDocs} PDF
-          {totalDocs === 1 ? '' : 's'} saved so far. This works fully offline and needs no
-          account; it also means this data is specific to this browser until cloud sync lands.
+          {totalDocs === 1 ? '' : 's'} saved so far. There's no account and nothing syncs —
+          this data belongs to this browser, on this device, only.
         </p>
 
         <div className="mt-4 border-t border-border pt-4">
           <p className="mb-1 text-sm font-medium">Backup</p>
           <p className="mb-3 text-xs text-muted">
             Download everything as a file you control — clearing browser data, switching
-            browsers, or getting a new device all wipe local storage with no way to get it back.
-            A backup is the safety net for that, independent of any account.
+            browsers, or getting a new device all wipe local storage with no way to get it
+            back. With no account and no cloud sync, this backup is the only safety net —
+            worth doing before anything risky (clearing site data, a browser update, a new
+            device).
           </p>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -240,92 +132,19 @@ export default function Settings() {
       <section className="rounded-card border border-border bg-surface p-5">
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">AI</h2>
 
-        <div className="mb-4 flex items-start gap-2">
-          {configured ? (
-            <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-green-600" />
-          ) : (
-            <AlertCircle size={16} className="mt-0.5 shrink-0 text-amber-500" />
-          )}
+        <div className="flex items-start gap-2">
+          <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-green-600" />
           <div>
-            <p className="text-sm font-medium">
-              {configured ? 'Connected' : 'Not configured'}
-            </p>
+            <p className="text-sm font-medium">No sign-in required</p>
             <p className="text-xs text-muted">
-              {configured
-                ? 'Sign in, then select text in a PDF to explain, simplify, or translate it.'
-                : 'Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your .env, then deploy the Edge Functions. Everything else works without it.'}
+              Select text in a PDF to explain, simplify, translate, or turn it into
+              flashcards and quizzes. AI requests go through this app's own server, which
+              keeps the API key private — there's no account and no per-user usage limit;
+              if a request is ever rejected as rate-limited, just wait a moment and retry.
             </p>
           </div>
         </div>
-
-        {!auth?.isSignedIn ? (
-          <p className="border-t border-border pt-3 text-sm text-muted">
-            <Link to="/login" className="text-accent hover:underline">
-              Sign in
-            </Link>{' '}
-            to see your usage.
-          </p>
-        ) : usage ? (
-          <>
-            <div className="flex items-center justify-between border-t border-border pt-3">
-              <div>
-                <p className="text-sm font-medium">
-                  AI requests this month: {usage.used} / {usage.limit}
-                </p>
-                <p className="text-xs text-muted">
-                  {usage.planName} plan. Resets at the start of each month.
-                </p>
-              </div>
-              <button
-                aria-label="Refresh usage"
-                onClick={loadUsage}
-                className="rounded-card p-1.5 text-muted hover:bg-accent-soft hover:text-ink"
-              >
-                <RefreshCw size={14} className={usageLoading ? 'animate-spin' : ''} />
-              </button>
-            </div>
-
-            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-paper">
-              <div
-                className="h-full bg-accent transition-all"
-                style={{ width: `${Math.min(100, (usage.used / usage.limit) * 100)}%` }}
-              />
-            </div>
-
-            <p className="mt-3 text-xs text-muted">
-              This is your real usage, enforced server-side — not a number this browser is just
-              trusting itself about.
-            </p>
-          </>
-        ) : (
-          <p className="border-t border-border pt-3 text-sm text-muted">
-            {usageLoading ? 'Loading…' : 'Usage unavailable right now.'}
-          </p>
-        )}
       </section>
-
-      {confirmingDelete && (
-        <Modal
-          title="Delete your account?"
-          onClose={() => !deleting && setConfirmingDelete(false)}
-          footer={
-            <>
-              <Button variant="outline" size="sm" onClick={() => setConfirmingDelete(false)} disabled={deleting}>
-                Cancel
-              </Button>
-              <Button variant="danger" size="sm" onClick={handleDeleteAccount} disabled={deleting}>
-                {deleting && <Loader2 size={14} className="animate-spin" />}
-                Delete account
-              </Button>
-            </>
-          }
-        >
-          <p className="text-sm text-muted">
-            This permanently deletes your profile and AI usage history. This can't be undone.
-          </p>
-          {deleteError && <p className="mt-2 text-sm text-red-500">{deleteError}</p>}
-        </Modal>
-      )}
     </div>
   )
 }

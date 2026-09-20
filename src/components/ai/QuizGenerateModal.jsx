@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { Link, useLocation } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import Modal from '../common/Modal.jsx'
 import Button from '../common/Button.jsx'
@@ -15,7 +14,6 @@ export default function QuizGenerateModal({ onClose, onGenerate, generating, err
   const [count, setCount] = useState(10)
   const [scope, setScope] = useState('page')
   const [types, setTypes] = useState(['multiple_choice', 'true_false'])
-  const location = useLocation()
 
   function toggleType(id) {
     setTypes((prev) => (prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]))
@@ -105,15 +103,6 @@ export default function QuizGenerateModal({ onClose, onGenerate, generating, err
         {error && (
           <div className="text-xs text-red-500">
             <p>{error}</p>
-            {errorCode === 'auth_required' && (
-              <Link
-                to="/login"
-                state={{ from: location.pathname }}
-                className="mt-1.5 inline-block rounded-card border border-accent bg-accent-soft px-2 py-1 font-medium text-ink hover:bg-accent hover:text-white"
-              >
-                Sign in
-              </Link>
-            )}
           </div>
         )}
       </div>

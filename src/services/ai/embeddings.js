@@ -1,38 +1,20 @@
-import { AiError, isAiConfigured } from './aiService.js'
-import { supabase } from '../supabase/client.js'
+import { AiError } from './aiService.js'
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
-
+const AI_EMBED_ENDPOINT = '/api/gemini-embed'
 const MAX_TEXTS_PER_CALL = 100
-
-async function getAccessToken() {
-  const { data } = await supabase.auth.getSession()
-  return data.session?.access_token ?? null
-}
 
 // Embeds an arbitrary number of texts, splitting into batches of
 // MAX_TEXTS_PER_CALL so a large document only costs a handful of requests
 // rather than one per chunk. Returns vectors in the same order as `texts`.
 //
-// Each batch requires a signed-in session and counts against the same
-// monthly AI quota as explain/simplify/etc — both enforced server-side in
-// the Edge Function, same as aiService.js (see that file's comment for why
-// there's no client-side quota check here anymore). `onBatch(batchResult,
-// batchStartIndex)` fires after each successful batch so a caller indexing
-// a large document (rag.js) can persist progress incrementally — if quota
-// runs out on batch 6 of 10, the first 5 batches' worth of embeddings were
-// already paid for and shouldn't be thrown away.
+// Same-origin call, no token, no accounts — see aiService.js's header
+// comment. `onBatch(batchResult, batchStartIndex)` fires after each
+// successful batch so a caller indexing a large document (rag.js) can
+// persist progress incrementally — if a batch fails partway through a long
+// document, the earlier batches' embeddings are kept and saved, not
+// discarded.
 export async function embedTexts(texts, { onBatch } = {}) {
-  if (!isAiConfigured()) {
-    throw new AiError('AI is not configured yet.', { code: 'not_configured' })
-  }
   if (texts.length === 0) return []
-
-  const token = await getAccessToken()
-  if (!token) {
-    throw new AiError('Sign in to use AI features.', { code: 'auth_required' })
-  }
 
   const batches = []
   for (let i = 0; i < texts.length; i += MAX_TEXTS_PER_CALL) {
@@ -45,13 +27,9 @@ export async function embedTexts(texts, { onBatch } = {}) {
 
     let response
     try {
-      response = await fetch(`${SUPABASE_URL}/functions/v1/gemini-embed`, {
+      response = await fetch(AI_EMBED_ENDPOINT, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-          apikey: SUPABASE_ANON_KEY
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ texts: batch })
       })
     } catch {
@@ -64,7 +42,7 @@ export async function embedTexts(texts, { onBatch } = {}) {
 
     if (!response.ok) {
       throw new AiError(data?.error || 'Embedding request failed.', {
-        code: response.status === 401 ? 'auth_required' : response.status === 429 ? 'quota_exceeded' : 'server'
+        code: response.status === 429 ? 'quota_exceeded' : response.status === 500 ? 'not_configured' : 'server'
       })
     }
 

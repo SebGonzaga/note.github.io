@@ -11,7 +11,6 @@ export default function Layout({
   toggleTheme,
   search,
   setSearch,
-  auth,
   context
 }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -40,7 +39,7 @@ export default function Layout({
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        <Sidebar folders={folders} notebooks={notebooks} documents={documents} auth={auth} />
+        <Sidebar folders={folders} notebooks={notebooks} documents={documents} />
       </div>
 
       <div className="flex flex-1 flex-col overflow-hidden">

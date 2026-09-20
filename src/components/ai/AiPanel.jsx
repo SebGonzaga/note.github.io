@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { Link, useLocation } from 'react-router-dom'
 import { X, Copy, Check, Loader2, AlertCircle, Send, BookOpen, Globe, Layers, Database } from 'lucide-react'
 import { CONTEXT_MODES } from '../../services/ai/context.js'
 
@@ -23,7 +22,6 @@ export default function AiPanel({
   state, // { status, mode, selectedText, result, error }
   contextMode,
   setContextMode,
-  usage,
   onClose,
   onFollowUp,
   onRetry,
@@ -36,7 +34,6 @@ export default function AiPanel({
   const [copied, setCopied] = useState(false)
   const [question, setQuestion] = useState('')
   const [savedCount, setSavedCount] = useState(null)
-  const location = useLocation()
 
   const { status, mode, selectedText, result, error } = state
   const isFlashcards = mode === 'flashcards'
@@ -97,23 +94,13 @@ export default function AiPanel({
               <AlertCircle size={15} className="mt-0.5 shrink-0" />
               <span>{error}</span>
             </div>
-            {state.errorCode === 'auth_required' ? (
-              <Link
-                to="/login"
-                state={{ from: location.pathname }}
-                className="inline-block rounded-card border border-accent bg-accent-soft px-2 py-1 text-xs font-medium text-ink hover:bg-accent hover:text-white"
+            {onRetry && (
+              <button
+                onClick={onRetry}
+                className="rounded-card border border-border px-2 py-1 text-xs text-ink hover:bg-accent-soft"
               >
-                Sign in
-              </Link>
-            ) : (
-              onRetry && (
-                <button
-                  onClick={onRetry}
-                  className="rounded-card border border-border px-2 py-1 text-xs text-ink hover:bg-accent-soft"
-                >
-                  Try again
-                </button>
-              )
+                Try again
+              </button>
             )}
           </div>
         )}
@@ -217,11 +204,6 @@ export default function AiPanel({
               </option>
             ))}
           </select>
-          {usage && (
-            <span className="text-[11px] text-muted" title={`${usage.planName} plan, resets monthly`}>
-              {usage.remaining}/{usage.limit}
-            </span>
-          )}
         </div>
       </div>
     </div>

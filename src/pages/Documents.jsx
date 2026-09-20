@@ -6,9 +6,9 @@ import Button from '../components/common/Button.jsx'
 import { loadPdf } from '../services/pdf/pdfjs.js'
 import * as docStore from '../services/storage/documents.js'
 
-// Upload guardrails. The spec calls for validating file type, size, and
-// quota before accepting an upload; size is enforced here and the quota
-// check moves server-side once Supabase Storage lands in a later phase.
+// Upload guardrails: validate file type and size before accepting an
+// upload. There's no server-side storage quota to check against — files
+// live only in this browser's IndexedDB.
 const MAX_SIZE_MB = 50
 
 export default function Documents() {

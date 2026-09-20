@@ -1,24 +1,29 @@
-# Inkwell — AI Study Notebook (Phase 1–7: through Accounts + Real Security)
+# Inkwell — AI Study Notebook (no-accounts build)
 
-This is the Phase 1–7 build of the AI study notebook described in the master
-development prompt: layout, library, notebook/page system, local-first storage,
-light/dark theming, a full handwriting canvas, typed text boxes and images,
-the PDF study system, the Highlight → Explain signature feature,
-document-aware retrieval, AI-generated flashcards and quizzes, and now real
-accounts — sign up/in/out, password reset, Google, Postgres, Row Level
-Security, and server-side usage enforcement.
+This is the AI study notebook described in the master development prompt:
+layout, library, notebook/page system, local-first storage, light/dark
+theming, a full handwriting canvas, typed text boxes and images, the PDF
+study system, the Highlight → Explain signature feature, document-aware
+retrieval, and AI-generated flashcards and quizzes.
 
-**The core loop from the spec is now complete end to end:** upload material →
-study it → highlight something confusing → AI toolbar appears → ask →
-get an explanation that cites your own document — reaching a definition
-200 pages away, turning a highlight into a flashcard you'll actually review
-later, or testing yourself with a generated quiz. **AI features now require
-signing in** — not as a paywall, but because that's what makes the usage
-limit real instead of a number the browser was trusting itself about.
-Notebooks, PDFs, and annotations remain fully local and account-free, per
-the spec's "let people experience the core loop before asking them to sign
-up" principle (§33) — signing in is only required for the parts that
-actually cost money to run.
+> **Note on this build:** an earlier version of this project went through
+> a Phase 7 with full accounts (sign up/in/out, Google OAuth, Postgres, Row
+> Level Security, server-side per-user usage quotas). That has been
+> deliberately removed. **There are no accounts anywhere in this app.**
+> Notebooks, PDFs, annotations, flashcards, and quizzes all live only in
+> this browser's IndexedDB — open the app and your previous work is just
+> there, with nothing to sign into and nothing that syncs anywhere. The
+> *only* thing that ever leaves the device is an AI request (explain,
+> simplify, flashcards, quiz, embeddings for indexing), which goes to this
+> app's own two serverless functions in `/api`, which forward it to Gemini
+> and hide the API key. See "AI backend" below for what that means in
+> practice, including the trade-off of not having per-user quotas anymore.
+
+**The core loop:** upload material → study it → highlight something
+confusing → AI toolbar appears → ask → get an explanation that cites your
+own document — reaching a definition 200 pages away, turning a highlight
+into a flashcard you'll actually review later, or testing yourself with a
+generated quiz. None of this requires signing in, ever.
 
 ## Run it locally
 
@@ -30,7 +35,12 @@ npm install
 npm run dev
 ```
 
-Then open the URL Vite prints (usually `http://localhost:5173`).
+Then open the URL Vite prints (usually `http://localhost:5173`). Everything
+except the AI features works immediately, with zero configuration. For the
+AI features to work locally too, see "AI backend" below — you'll need a
+Gemini API key and a way to run the `/api` functions locally (e.g. the
+Vercel CLI's `vercel dev`, which serves both the Vite frontend and the
+`/api` functions together).
 
 ## What's implemented
 
@@ -43,6 +53,7 @@ Then open the URL Vite prints (usually `http://localhost:5173`).
   a small dependency-free wrapper (`src/services/storage`). No backend, no
   account, works fully offline.
 - **Theme** — light/dark mode via CSS variables, toggle in the top bar and in
+
   Settings, persisted across reloads.
 
 **Phase 2 — Handwriting**
@@ -96,10 +107,9 @@ Then open the URL Vite prints (usually `http://localhost:5173`).
   live-restyle an already-placed box (reopen it to retype, or plan a small
   "format selected text box" affordance later); and images are embedded as
   base64 in the element data rather than uploaded to object storage, which
-  is fine for local-first Phase 3 but should move to Supabase Storage
-  (metadata + storage path, per the spec) once Phase 7+ cloud sync lands, to
-  keep the local database size and sync payloads reasonable for
-  photo-heavy notebooks.
+  is fine for local-first storage but would need to move to object storage
+  (metadata + storage path) if cloud sync is ever added, to keep the local
+  database size and sync payloads reasonable for photo-heavy notebooks.
 
 **Phase 4 — PDF study system**
 - **Documents library** at `/documents`: upload by button or drag-and-drop,
@@ -137,8 +147,8 @@ it (main bundle stays at ~70 kB gzipped).
 per-match (no in-page match highlighting or next/previous stepping yet —
 the text layer can support it when needed); only one page renders at a time
 rather than a continuous scroll; undo history resets when you change pages;
-and PDFs are stored as blobs in IndexedDB, which moves to Supabase Storage
-(metadata row + storage path) in the cloud-sync phase.
+and PDFs are stored as blobs in IndexedDB, which would move to object
+storage (metadata row + storage path) if cloud sync is ever added.
 
 **Phase 5 — Highlight → Explain (the signature feature)**
 - Select any text in a PDF and a contextual toolbar appears offering
@@ -170,27 +180,29 @@ through the model. Real retrieval — chunking, embeddings, pgvector — is
 Phase 6; this focused-neighbourhood approach is what makes the feature
 usable before then.
 
-*Security.* `GEMINI_API_KEY` is read **only** inside the Edge Function, as a
-Supabase secret. There is deliberately no `VITE_GEMINI_*` variable anywhere
-in this project, because anything prefixed `VITE_` is compiled into the
-browser bundle and is therefore public. The frontend calls our own function;
-only that function calls Gemini.
+*Security.* `GEMINI_API_KEY` is read **only** inside the `/api` serverless
+functions, as a server-side environment variable. There is deliberately no
+`VITE_GEMINI_*` variable anywhere in this project, because anything
+prefixed `VITE_` is compiled into the browser bundle and is therefore
+public. The frontend calls our own same-origin `/api/gemini-explain` and
+`/api/gemini-embed` functions; only those functions call Gemini.
 
-*Usage tracking* records the fields the spec's `ai_requests` table needs
-(feature, model, token counts, duration, success) and enforces the free
-plan's 100 requests/month. Plan limits live in `src/config/plans.js` rather
-than being scattered through the UI, so they become a database table in
-Phase 7 without touching components.
+*Rate limiting, not per-user quotas.* There are no accounts, so there is no
+per-user identity to attach a usage limit to. Instead, `api/_shared/rateLimit.js`
+does simple, best-effort per-IP rate limiting (a short burst cap plus a
+daily cap), entirely in the function's own memory — no database. This is a
+much weaker control than a real per-user quota: it resets when the
+serverless instance recycles and is easy to route around with a VPN. It
+exists to stop a runaway loop or a stray bug from quietly spending your
+whole Gemini budget, not to police individual users.
 
 **Known limitations to revisit:**
-- **Usage limits are client-side and are not a security control.** Anyone can
-  clear localStorage and reset their own counter. This exists so the limit
-  UI and quota-exceeded path are built and testable now; real enforcement
-  requires auth and must live in the Edge Function (Phase 7). The function is
-  also currently unauthenticated — fine for local development, **not safe to
-  expose publicly as-is**, since anyone with the URL could spend your Gemini
-  quota. Deploy it publicly only after adding the auth checks marked in
-  `supabase/functions/gemini-explain/index.ts`.
+- **Rate limiting is best-effort and in-memory, not a real security
+  control.** It resets whenever the function's instance recycles and only
+  tracks by IP, so it's easy to work around deliberately. If this app gets
+  meaningful traffic, replace it with a durable store (e.g. a KV/Redis
+  counter) or bring back some form of accounts if you need real per-user
+  quotas.
 - AI is available on PDFs only so far. Selection inside typed notes and
   handwritten pages comes next.
 - Context is limited to the current and adjacent pages; a term defined 200
@@ -298,9 +310,10 @@ number for every mode.
 
 **Known limitations to revisit:**
 - Retrieval is cosine similarity over an in-browser array — fine at the
-  scale of one document's chunks, but it's the client-side stand-in for
-  real pgvector similarity search, which is where this moves once Postgres
-  is in the picture (Phase 7).
+  scale of one document's chunks, but it would need a real vector database
+  (e.g. pgvector) to scale to a large library, which this build
+  deliberately doesn't have (no backend database at all — see the
+  no-accounts note at the top of this file).
 - No re-indexing prompt if a document's annotations change; indexing only
   ever looks at the PDF's own text, which doesn't change, so this is
   actually fine — noted in case that assumption ever stops holding.
@@ -314,79 +327,36 @@ number for every mode.
 - The chunk size (700 chars) and match threshold (0.65 cosine similarity)
   are fixed constants, not tuned against real study material yet.
 
-**Phase 7 — Accounts, Postgres, RLS, and server-side security**
+**Accounts, Postgres, and per-user quotas were removed**
 
-This phase's job was to close a gap flagged as far back as Phase 5: AI
-usage limits were tracked client-side only, in localStorage, which anyone
-could clear — a courtesy counter, not a security control. Phase 7 makes it
-real.
+An earlier version of this project went through a "Phase 7" that added full
+accounts — sign up/in/out, password reset, Google OAuth, a Postgres schema
+with Row Level Security, and server-side per-user AI usage quotas backed by
+that database. All of it has been deliberately removed:
 
-*Accounts.* Sign up, sign in, sign out, password reset (email link),
-Google OAuth, session persistence, protected AI actions. Auth pages
-(`/login`, `/signup`, `/forgot-password`, `/reset-password`) are their own
-standalone layout, no sidebar — matching spec §17's split between
-unauthenticated-accessible pages and the main app.
+- No sign-up/sign-in/sign-out, no password reset, no Google OAuth, no
+  account deletion.
+- No Postgres, no Row Level Security, no `profiles`/`plans`/`ai_requests`
+  tables, no database of any kind.
+- No per-user usage quota. AI abuse protection is now a simple per-IP rate
+  limit inside the `/api` functions themselves (see "AI backend" below) —
+  much weaker than a real per-user quota, but it needs no accounts and no
+  database to exist.
+- Notebooks, PDFs, and annotations were never affected by any of this —
+  they were local-first (IndexedDB-only) from Phase 1 onward and remain
+  exactly that. Nothing about "your work is just there when you open the
+  app" changed; what changed is that AI features no longer require signing
+  in to use them at all, because there's no more "signing in."
 
-*A real compatibility bug caught and fixed before it could bite anyone:*
-this app uses `HashRouter` (`/#/route`), and Supabase's default auth flow
-also puts its one-time tokens in the URL hash — the two uses of the hash
-collide, and a password-reset or OAuth redirect would silently fail to
-sign anyone in (confirmed against Supabase's own team statement that hash
-routers aren't supported under the default flow, not just inferred). Fixed
-by forcing `flowType: 'pkce'` in the client config, which puts the token in
-a query string (`?code=...`) instead, sitting harmlessly alongside a
-`#/route` fragment in the same URL. See the comment in
-`services/supabase/client.js` for the full reasoning.
+If you want real per-user usage limits back later, the straightforward
+path is reintroducing some form of identity (even something lighter than
+full accounts, like a device-bound anonymous ID) and a durable store for
+counting requests against it — a KV store or a small database — rather
+than the in-memory IP rate limiting this build uses instead.
 
-*Database schema + Row Level Security* (`supabase/migrations/0001_init.sql`):
-every table a user's data could live in — profiles, plans, ai_requests,
-folders, notebooks, pages, documents, document_chunks, pdf_annotations,
-flashcards, quizzes, quiz_attempts — gets RLS enabled with a policy of
-`auth.uid() = user_id`. This is the actual boundary preventing one user
-from reading or writing another's data — not application code, which the
-spec is explicit should never be trusted for this (§16). A Postgres
-trigger creates a `profiles` row automatically on sign-up. `plans` is
-seeded with `free` (100 requests/month) and `premium` (2000/month) rows,
-matching spec §32's "don't hardcode pricing" rule — a real subscription
-system later just updates `profiles.plan_id`, nothing in application code
-changes.
 
-*Server-side usage enforcement* (`supabase/functions/_shared/authUsage.ts`,
-shared by both Edge Functions): every AI call now requires
-`Authorization: Bearer <the user's own access token>`, not the anon key.
-The function verifies that token, looks up the caller's plan, counts their
-`ai_requests` rows for the current month, and rejects with 429 if they're
-over the limit — all server-side, all using a Postgres client scoped to
-that token so RLS makes it structurally impossible to check or inflate
-someone else's usage. The old localStorage-based tracking
-(`services/ai/usage.js`) is deleted, not just deprecated — replaced by
-`services/ai/serverUsage.js`, which reads the real count from Postgres
-with the same verified identity. Settings' usage meter shows this number
-now, with a line making clear it's real: *"This is your real usage,
-enforced server-side — not a number this browser is just trusting itself
-about."*
-
-*Account deletion* (spec §18) is an Edge Function
-(`supabase/functions/delete-account`), not a client SDK call — deleting an
-`auth.users` row requires the service-role key, which must never reach the
-browser. The function verifies the request came from the account being
-deleted (via that account's own JWT), removes their Storage files, then
-deletes the auth user — every table cascades automatically via
-`on delete cascade` in the schema. **Honest scope note:** this deletes the
-account and its server-side data (profile, usage history); notebooks/PDFs/
-annotations still live only in each browser's IndexedDB as of this phase
-(see below) and aren't touched by account deletion yet — Settings says this
-explicitly rather than implying a completeness that isn't there yet.
-
-*What did NOT change: local-first still works with zero account.* Creating
-notebooks, drawing, typing notes, uploading and annotating PDFs — none of
-it requires signing in, and none of it changed in this phase. Only the AI
-actions (Highlight → Explain, flashcards, quizzes, indexing) now gate on
-being signed in, surfaced as a "Sign in" link inline wherever an AI action
-is triggered (the AI panel's error state, and the quiz generation modal)
-rather than a redirect that loses whatever you were doing.
-
-**Local backup & restore** (added after Phase 7, before cloud sync): Settings
+**Local backup & restore** (added before cloud sync, and unaffected by
+removing accounts): Settings
 → Storage → Download backup exports everything — folders, notebooks, pages,
 document metadata, PDF files, annotations, flashcards, and quizzes — as a
 single `.zip` the person downloads and controls. This exists because
@@ -418,35 +388,18 @@ browser-side zip/unzip. Lazy-loaded alongside Settings (same reasoning as
 the PDF routes) so visitors who never open Settings don't pay for it.
 
 **Known limitations to revisit:**
-- **Cloud sync is not implemented yet.** The schema exists (folders,
-  notebooks, pages, documents, document_chunks, pdf_annotations,
-  flashcards, quizzes, quiz_attempts are all real tables with real RLS),
-  but the application code for notebooks/PDFs/annotations still reads and
-  writes IndexedDB exclusively, same as Phases 1-6. This is the single
-  biggest remaining gap: signing in currently gets you AI access and a
-  real usage meter, not synced data across devices. This is a deliberate
-  scope cut for this phase, not an oversight — migrating every storage.js
-  function from IndexedDB to Postgres (plus Storage for PDF blobs, plus a
-  local→cloud migration path for data created before signing in) is a
-  comparably large lift to everything else in this phase combined, and
-  mixing it in risked doing both halves worse. It's next.
-- No email-verification-required gate in the UI beyond what Supabase's
-  project settings enforce — if email confirmation is required, `signUp()`
-  correctly shows "check your email" (no session comes back), but there's
-  no in-app banner nudging an unconfirmed user who's somehow already
-  signed in (e.g. via a provider that skips confirmation).
-- `plans.features` (ocr, advancedContext) exists in the schema and is
-  seeded, but nothing reads it yet to actually gate a feature — it's
-  ready for Phase 8's premium features, not wired to anything yet.
-- The Edge Functions' CORS is still `Access-Control-Allow-Origin: '*'`,
-  same flag as earlier phases — tighten to your actual domain before
-  going live.
-- Adding `@supabase/supabase-js` to power `useAuth()` (needed everywhere,
-  so it's in the main bundle, not lazy-loaded) added real weight: main
-  bundle gzipped went from ~72 KB to ~75 KB. Worth watching if it keeps
-  growing.
+- **There is no cloud sync, by design.** Notebooks, PDFs, annotations,
+  flashcards, and quizzes live only in the current browser's IndexedDB.
+  Clearing site data, switching browsers, or moving to a new device all
+  lose that data with no way to get it back except a manual backup
+  restore (above). If you want cross-device sync later, that requires
+  bringing back some form of backend storage and, realistically, some
+  form of identity to know which data belongs to whom.
+- No premium/plan-gated features exist — there's no concept of a plan at
+  all now that there are no accounts.
 
-## Deployment: Vercel (frontend) + Supabase (AI backend)
+## Deployment: Vercel (frontend + AI backend)
+
 
 ### Frontend
 
@@ -455,108 +408,86 @@ The app is a static Vite build, so Vercel needs zero configuration:
 1. Push this repo to GitHub.
 2. Import it in Vercel ("Add New Project" → pick the repo). Vercel
    auto-detects Vite (`npm run build`, output `dist/`) — no `vercel.json`
-   needed.
+   needed. The two functions in `/api` are auto-detected and deployed as
+   serverless functions alongside the static build, with no separate
+   deploy step.
 3. Every push to `main` redeploys automatically; PRs get preview URLs.
 
 `vite.config.js` uses `base: './'` and the app uses `HashRouter`, so it works
 the same on Vercel's root domain or a subpath, with no rewrite rules for
 client-side routing.
 
-Notebooks, PDFs and annotations all work with no backend at all. Only the AI
-features need the steps below.
+Notebooks, PDFs and annotations all work with no configuration at all. Only
+the AI features need the one step below.
 
 ### AI backend
 
 ```
-Browser (Vercel) → Supabase Edge Function → Gemini API
+Browser → /api/gemini-explain or /api/gemini-embed (same origin) → Gemini API
 ```
 
-The Gemini key never reaches the browser. It's a Supabase secret readable
-only by the Edge Functions — **not** a `VITE_` variable, since those are
-compiled into the public bundle.
-
-```bash
-# 1. Push the schema — profiles, plans, ai_requests, and the cloud-sync
-#    target tables, all with RLS. Also creates the private `documents`
-#    Storage bucket for a later phase.
-supabase db push
-
-# 2. Deploy the three functions.
-supabase functions deploy gemini-explain
-supabase functions deploy gemini-embed
-supabase functions deploy delete-account
-
-# 3. One secret, shared by gemini-explain and gemini-embed.
-#    delete-account needs no secret of its own — it uses
-#    SUPABASE_SERVICE_ROLE_KEY, which Supabase provides automatically.
-supabase secrets set GEMINI_API_KEY=your-key-here
-```
-
-(`gemini-explain` handles `explain`/`simplify`/`inContext`/`notes`/
-`translate`/`flashcards`/`quiz` — no separate function needed per mode.)
-
-In the Supabase dashboard, under Authentication:
-- Email auth is on by default — nothing to do.
-- To make the "Continue with Google" button work, add a Google provider
-  under Authentication → Providers. Skippable; email/password works
-  without it.
-
-Then set these in Vercel's environment variables (and your local `.env`):
+The Gemini key never reaches the browser. Set it once, in Vercel's
+dashboard under Project → Settings → Environment Variables:
 
 ```
-VITE_SUPABASE_URL=https://<project-ref>.supabase.co
-VITE_SUPABASE_ANON_KEY=<your anon key>
+GEMINI_API_KEY=your-key-here
 ```
 
-Settings → AI shows whether the connection is configured; Settings →
-Account shows whether you're signed in.
+That's the entire setup — no database to push a schema to, no separate
+functions to deploy, no secrets CLI, no OAuth provider to configure. The
+two `/api` files read `process.env.GEMINI_API_KEY` on the server only;
+nothing prefixed `VITE_` is used for this, since those would be compiled
+into the public bundle.
 
-> **Phase 7 closed the security gap flagged in earlier phases.** The Edge
-> Functions now require a real signed-in user (`Authorization: Bearer
-> <access token>`, verified server-side) and enforce usage limits from
-> Postgres, not a client-side counter anyone could clear. What's still
-> worth doing before a public launch: tighten the Edge Functions' CORS
-> `Access-Control-Allow-Origin` from `*` to your actual domain, and see
-> the Phase 7 section above for what's deliberately still local-only
-> (cloud sync of notebooks/PDFs isn't implemented yet).
+(`/api/gemini-explain` handles `explain`/`simplify`/`inContext`/`notes`/
+`translate`/`flashcards`/`quiz` — no separate function needed per mode.
+`/api/gemini-embed` handles the batch embeddings used for RAG indexing.)
+
+Settings → AI just confirms there's no sign-in required; it doesn't check
+whether `GEMINI_API_KEY` is actually set; a request without a key configured
+comes back as an error in the AI panel itself.
+
+> **This app has no accounts, no database, and no per-user usage quota.**
+> The only abuse protection is the best-effort, in-memory, per-IP rate
+> limiting in `api/_shared/rateLimit.js` (see the "Accounts, Postgres, and
+> per-user quotas were removed" note above for what that trades away, and
+> what to do instead if you need real per-user limits later).
 
 ## What's next (per the roadmap)
 
-- **Cloud sync** — the single biggest remaining gap (see the Phase 7
-  section above): migrate notebooks/pages/documents/annotations/
-  flashcards/quizzes from IndexedDB-only to the Postgres schema that
-  already exists and has RLS, with local IndexedDB becoming an offline
-  cache/queue in front of it rather than the sole source of truth. Needs a
-  migration path for data created before signing in, and conflict handling
-  for editing offline.
-- **Real pgvector similarity search**, replacing the in-browser
-  cosine-similarity array — the schema and `document_chunks.embedding`
-  column are already there, waiting for chunks to actually live server-side.
+- **Cloud sync** — reintroducing some form of backend storage so
+  notebooks/pages/documents/annotations/flashcards/quizzes can follow a
+  person across devices. This build deliberately doesn't have one; it
+  would need its own identity story (even something lighter than full
+  accounts) to know whose data is whose.
+- **Real vector similarity search** (e.g. pgvector), replacing the
+  in-browser cosine-similarity array — only relevant once there's a
+  server-side database to hold chunks in.
+- **Durable rate limiting** — replacing the in-memory per-IP limiter with
+  a KV/Redis-backed one that survives instance recycling, if this app gets
+  real traffic.
 - **Spaced repetition** for flashcard review, replacing the current
   fully-random shuffle.
 - **Quiz/flashcard generation from a notebook's typed/handwritten notes**,
   not just PDFs — the generation plumbing is already mode-agnostic on the
   server; it just needs a notebook-side context builder analogous to
   `buildPdfContext`.
-- **Phase 8+** — subscriptions/billing (Stripe, per spec §34 — `plans` and
-  `profiles.plan_id` are already the target shape), admin dashboard, OCR,
-  production hardening.
+- OCR, production hardening, and anything else that doesn't depend on
+  reintroducing a backend.
 
 ## Project structure
 
 ```
 src/
   components/
-    layout/, sidebar/   app shell — sidebar now shows sign-in state
-    auth/               AuthCard.jsx — shared centered-card layout for
-                         the standalone /login, /signup etc. pages
+    layout/, sidebar/   app shell
     canvas/             DrawingCanvas.jsx — pointer capture, stroke
                          rendering, eraser/select hit-testing
                          ElementsLayer.jsx — DOM overlay for text boxes and
                          images: placement, drag, resize, inline editing
     ai/                 AiSelectionToolbar.jsx — the highlight→explain popover
                          AiPanel.jsx — response, grounding badge, follow-ups,
-                         flashcard results, indexing controls, sign-in prompt
+                         flashcard results, indexing controls
                          QuizGenerateModal.jsx, QuizPanel.jsx — quiz config
                          and quiz-taking (docked or floating/modal variant)
     pdf/                PdfPage.jsx — stacks raster + text + ink + elements
@@ -564,36 +495,27 @@ src/
                          PdfThumbnail.jsx — page-list previews
     toolbar/            Toolbar.jsx — tool + color/size/opacity/font controls
     common/             Button, Modal
+
   pages/
     Home, Notebook, Documents, Document, Flashcards, Quizzes, Settings
-    auth/               SignIn, SignUp, ForgotPassword, ResetPassword —
-                         standalone routes, no sidebar
   services/
     storage/            IndexedDB CRUD — notebooks, pages, documents, files,
-                         PDF annotations, flashcards, quizzes (still local
-                         as of Phase 7 — see the cloud-sync note above)
+                         PDF annotations, flashcards, quizzes (the only
+                         place any of this data lives — no server copy)
     pdf/pdfjs.js         PDF.js setup + helpers
-    ai/aiService.js       provider-agnostic AI interface (now requires auth)
+    ai/aiService.js       provider-agnostic AI interface — same-origin
+                           fetch to /api, no accounts/tokens
     ai/context.js         context assembly + priority order
-    ai/serverUsage.js     real usage, read from Postgres (replaces the
-                           deleted client-only ai/usage.js from Phase 5-6)
     ai/rag.js              chunking, indexing, similarity retrieval
     ai/embeddings.js       batched embedding calls + cosine similarity
-    auth/authService.js    sign up/in/out, password reset, Google, delete
-    supabase/client.js     the one Supabase client — see its PKCE comment
-    ocr/, search/          reserved for later phases
-  config/       plans.js — plan limits (now mirrored in the `plans` table)
-  hooks/        useTheme, useHistory (per-page undo/redo), useAuth (session)
+    ocr/, search/          reserved for later
+  hooks/        useTheme, useHistory (per-page undo/redo)
   utils/        strokes.js (hit-testing geometry), toolDefaults.js
-supabase/
-  migrations/0001_init.sql   schema + RLS + storage policies (Phase 7)
-  functions/
-    gemini-explain/   explain/simplify/inContext/notes/translate/
-                       flashcards/quiz — authenticated, quota-enforced
-    gemini-embed/     batch embeddings for indexing — same auth pattern
-    delete-account/   the one place the service-role key is used
-    _shared/authUsage.ts   auth verification + quota check/record,
-                            shared by both AI functions
+api/
+  gemini-explain.js   explain/simplify/inContext/notes/translate/
+                       flashcards/quiz — holds GEMINI_API_KEY, no accounts
+  gemini-embed.js     batch embeddings for indexing — same pattern
+  _shared/rateLimit.js   best-effort per-IP rate limiting, shared by both
 ```
 
 The data model matches the spec: `Notebook { id, title, folderId, createdAt,
@@ -614,17 +536,14 @@ size, timestamps, `indexStatus`/`chunkCount`/`indexedAt`), `files` (the raw
 blob, keyed by document id), `pdfAnnotations` (one row per document+page
 holding an `elements` array in the same shape above), `documentChunks` (one
 row per chunk — `{ id, documentId, pageNumber, chunkIndex, text, embedding
-}`, the client-side stand-in for the spec's pgvector table), `flashcards`
+}`, embeddings live only here — no separate vector database), `flashcards`
 (`{ id, documentId, pageNumber, front, back, sourceText, reviews, correct,
 lastReviewedAt }`), and `quizzes` (`{ id, documentId, pageNumber, title,
 questions: [{ type, prompt, options, correctAnswer, explanation }],
 attempts: [{ score, total, completedAt }] }`). Deleting a document cascades
-through all six locally, leaving nothing orphaned.
-
-**As of Phase 7, this IndexedDB data model has a matching Postgres schema**
-(`supabase/migrations/0001_init.sql`) that isn't wired up yet — see "What's
-next" above. The only server-side tables actually in use today are
-`profiles`, `plans`, and `ai_requests` (accounts + real usage enforcement).
+through all six locally, leaving nothing orphaned. This IndexedDB store is
+the only copy of this data anywhere — there's no server-side schema for it,
+matching or otherwise, since this build has no database at all.
 
 ## Design notes
 
