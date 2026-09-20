@@ -291,12 +291,18 @@ export default async function handler(req, res) {
     }
 
     if (isQuiz) {
-      const questions = Array.isArray(parsed?.questions)
-        ? parsed.questions
-            .map((q) => sanitizeQuestion(q))
-            .filter((q) => q !== null)
-            .slice(0, quizCount)
-        : []
+      const rawQuestions = Array.isArray(parsed?.questions) ? parsed.questions : []
+      const questions = rawQuestions.map((q) => sanitizeQuestion(q)).filter((q) => q !== null).slice(0, quizCount)
+      if (rawQuestions.length > 0 && questions.length === 0) {
+        // The model returned questions, but none survived validation — log
+        // enough to diagnose why (bad JSON shape, correctAnswer that never
+        // matched an option, etc.) without dumping the whole raw payload.
+        console.error(
+          `gemini-explain: quiz mode discarded all ${rawQuestions.length} question(s) from ${GEMINI_MODEL}. Sample: ${JSON.stringify(rawQuestions[0]).slice(0, 400)}`
+        )
+      } else if (!parsed && raw) {
+        console.error(`gemini-explain: quiz mode got unparseable JSON from ${GEMINI_MODEL}: ${raw.slice(0, 400)}`)
+      }
       return res.status(200).json({
         questions,
         grounding: parsed?.grounding ?? (hasContext ? 'mixed' : 'general'),
@@ -341,12 +347,17 @@ function sanitizeQuestion(q) {
   if (q.type === 'multiple_choice') {
     if (!Array.isArray(q.options) || q.options.length < 2) return null
     const options = q.options.map((o) => String(o)).slice(0, 6)
-    const correctAnswer = String(q.correctAnswer ?? '')
-    // Require an exact match to one of the options — an answer that only
-    // "sort of" matches isn't verifiable, and shipping it would mean the
-    // quiz UI can't reliably highlight which option was correct.
-    if (!options.includes(correctAnswer)) return null
-    return { type: 'multiple_choice', prompt: q.prompt, options, correctAnswer, explanation }
+    const rawAnswer = String(q.correctAnswer ?? '')
+    // Match tolerantly (trim + case-insensitive) rather than requiring an
+    // exact string match. The model is instructed to echo one of the
+    // options verbatim, but it doesn't always match case/whitespace
+    // exactly — and the quiz UI already normalizes the same way when
+    // grading (see QuizPanel's `normalize`), so being this strict here
+    // only threw away otherwise-good questions.
+    const norm = (s) => s.trim().toLowerCase()
+    const matched = options.find((o) => norm(o) === norm(rawAnswer))
+    if (!matched) return null
+    return { type: 'multiple_choice', prompt: q.prompt, options, correctAnswer: matched, explanation }
   }
 
   if (q.type === 'identification') {
