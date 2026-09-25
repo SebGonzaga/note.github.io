@@ -15,6 +15,18 @@ import Modal from '../components/common/Modal.jsx'
 import Button from '../components/common/Button.jsx'
 import * as store from '../services/storage/notebooks.js'
 
+// Cover color swatches (FreeNotes-style aesthetic customization). `null`
+// clears back to the default look.
+const COVER_COLORS = [
+  { id: null, hex: null, label: 'Default' },
+  { id: 'pink', hex: '#f6c9d9', label: 'Pink' },
+  { id: 'mint', hex: '#bfe6cf', label: 'Mint' },
+  { id: 'lavender', hex: '#d6cdf2', label: 'Lavender' },
+  { id: 'sky', hex: '#c3e0f5', label: 'Sky' },
+  { id: 'peach', hex: '#f7d4b8', label: 'Peach' },
+  { id: 'butter', hex: '#f5e6a8', label: 'Butter' }
+]
+
 export default function Home({ filter = 'all' }) {
   const { folders, notebooks, refresh, search } = useOutletContext()
   const navigate = useNavigate()
@@ -97,6 +109,14 @@ export default function Home({ filter = 'all' }) {
     await refresh()
   }
 
+  async function handleColorChange(id, color) {
+    await store.setNotebookColor(id, color)
+    // Keeps the menu open (unlike other actions) — trying a couple of
+    // swatches in a row is the whole point, closing after one pick would
+    // mean reopening the menu for every color you want to compare.
+    await refresh()
+  }
+
   async function handleMove(id, folderId) {
     await store.moveNotebook(id, folderId)
     setOpenMenuId(null)
@@ -160,6 +180,7 @@ export default function Home({ filter = 'all' }) {
           onDelete={handleDelete}
           onDuplicate={handleDuplicate}
           onFavorite={handleFavorite}
+          onColorChange={handleColorChange}
           onMove={handleMove}
           folders={folders}
         />
@@ -184,6 +205,7 @@ export default function Home({ filter = 'all' }) {
                   onDelete={handleDelete}
                   onDuplicate={handleDuplicate}
                   onFavorite={handleFavorite}
+                  onColorChange={handleColorChange}
                   onMove={handleMove}
                   folders={folders}
                 />
@@ -205,6 +227,7 @@ export default function Home({ filter = 'all' }) {
                 onDelete={handleDelete}
                 onDuplicate={handleDuplicate}
                 onFavorite={handleFavorite}
+                onColorChange={handleColorChange}
                 onMove={handleMove}
                 folders={folders}
               />
@@ -276,19 +299,25 @@ function NotebookGrid({
   onDelete,
   onDuplicate,
   onFavorite,
+  onColorChange,
   onMove,
   folders
 }) {
   return (
     <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
-      {notebooks.map((nb) => (
+      {notebooks.map((nb) => {
+        const cover = COVER_COLORS.find((c) => c.id === nb.color)
+        return (
         <div
           key={nb.id}
           className="group relative cursor-pointer rounded-card border border-border bg-surface p-3 transition-shadow hover:shadow-md"
           onClick={() => onOpen(nb.id)}
         >
-          <div className="mb-3 flex aspect-[4/5] items-center justify-center rounded-card bg-paper text-muted">
-            <NotebookText size={26} />
+          <div
+            className="mb-3 flex aspect-[4/5] items-center justify-center rounded-card text-muted"
+            style={{ backgroundColor: cover?.hex || 'var(--paper)' }}
+          >
+            <NotebookText size={26} className={cover?.hex ? 'text-ink' : undefined} style={cover?.hex ? { opacity: 0.4 } : undefined} />
           </div>
 
           <div className="flex items-start justify-between gap-1">
@@ -327,6 +356,24 @@ function NotebookGrid({
                 onClick={() => onFavorite(nb.id)}
               />
               <MenuItem icon={<Copy size={14} />} label="Duplicate" onClick={() => onDuplicate(nb.id)} />
+              {onColorChange && (
+                <div className="border-t border-border px-3 py-2">
+                  <p className="mb-1.5 text-xs text-muted">Cover color</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {COVER_COLORS.map((c) => (
+                      <button
+                        key={c.id ?? 'default'}
+                        title={c.label}
+                        onClick={() => onColorChange(nb.id, c.id)}
+                        className={`h-5 w-5 rounded-full border ${
+                          nb.color === c.id ? 'border-ink' : 'border-border'
+                        }`}
+                        style={{ backgroundColor: c.hex || 'var(--paper)' }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
               {folders.length > 0 && (
                 <div className="border-t border-border">
                   <p className="px-3 pt-2 text-xs text-muted">Move to…</p>
@@ -352,7 +399,7 @@ function NotebookGrid({
             </div>
           )}
         </div>
-      ))}
+      )})}
     </div>
   )
 }

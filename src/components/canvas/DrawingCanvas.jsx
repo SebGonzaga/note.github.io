@@ -8,6 +8,8 @@ import {
   nextFountainWidth,
   applyFountainWidths
 } from '../../utils/strokes.js'
+import { wavePath, zigzagPath, doublePaths } from '../../utils/decorations.js'
+import { recognizeShape, shapeToPoints } from '../../services/ink/shapeRecognition.js'
 import { newId } from '../../services/storage/db.js'
 import { transcribeHandwriting } from '../../services/ai/aiService.js'
 import {
@@ -173,9 +175,21 @@ const DrawingCanvas = forwardRef(function DrawingCanvas(
 
   // --- Rendering ---------------------------------------------------------
 
-  function drawStroke(ctx, stroke, highlight) {
+  function drawStroke(ctx, stroke, highlight, live = false) {
     const pts = stroke.points
     if (pts.length === 0) return
+
+    // Decorative underlines (wave/zigzag/double/dash — see decorations.js)
+    // render from the stroke's real points but as a distinct pattern
+    // instead of a plain line. Only for the finished stroke: the live
+    // incremental preview only ever gets a 2-point slice, too short for a
+    // wave to mean anything, so it draws as a plain line while you're
+    // still writing and "snaps" to the pattern the moment you lift the pen.
+    if (stroke.tool === 'underline' && !live && pts.length >= 2) {
+      drawDecoratedUnderline(ctx, stroke)
+      if (highlight) drawSelectionBox(ctx, stroke)
+      return
+    }
 
     ctx.save()
     ctx.globalAlpha = stroke.opacity
@@ -208,22 +222,70 @@ const DrawingCanvas = forwardRef(function DrawingCanvas(
     }
     ctx.restore()
 
-    if (highlight) {
-      ctx.save()
-      ctx.globalAlpha = 1
-      ctx.strokeStyle = '#2563eb'
-      ctx.setLineDash([4, 3])
-      ctx.lineWidth = 1
-      const xs = pts.map((p) => p.x)
-      const ys = pts.map((p) => p.y)
-      const pad = stroke.width / 2 + 4
-      const minX = Math.min(...xs) - pad
-      const minY = Math.min(...ys) - pad
-      const w = Math.max(...xs) - Math.min(...xs) + pad * 2
-      const h = Math.max(...ys) - Math.min(...ys) + pad * 2
-      ctx.strokeRect(minX, minY, w, h)
-      ctx.restore()
+    if (highlight) drawSelectionBox(ctx, stroke)
+  }
+
+  // Extracted so the decorative-underline branch above (which returns
+  // early, before the rest of this function runs) can draw the same
+  // selection box as every other stroke type — copied verbatim from what
+  // was inline here, not changed.
+  function drawSelectionBox(ctx, stroke) {
+    const pts = stroke.points
+    ctx.save()
+    ctx.globalAlpha = 1
+    ctx.strokeStyle = '#2563eb'
+    ctx.setLineDash([4, 3])
+    ctx.lineWidth = 1
+    const xs = pts.map((p) => p.x)
+    const ys = pts.map((p) => p.y)
+    const pad = stroke.width / 2 + 4
+    const minX = Math.min(...xs) - pad
+    const minY = Math.min(...ys) - pad
+    const w = Math.max(...xs) - Math.min(...xs) + pad * 2
+    const h = Math.max(...ys) - Math.min(...ys) + pad * 2
+    ctx.strokeRect(minX, minY, w, h)
+    ctx.restore()
+  }
+
+  // FreeNotes-inspired decorative underline styles. Draws from the
+  // stroke's real hand-drawn points via decorations.js's pure geometry —
+  // selecting/erasing still hit-tests the real points, unaffected by how
+  // the pattern renders.
+  function drawDecoratedUnderline(ctx, stroke) {
+    const amplitude = Math.max(2, stroke.width)
+    const style = stroke.decoration || 'wave'
+
+    ctx.save()
+    ctx.globalAlpha = stroke.opacity ?? 1
+    ctx.strokeStyle = stroke.color
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    ctx.lineWidth = Math.max(1.5, stroke.width / 2.5)
+
+    function strokePath(pts) {
+      if (pts.length < 2) return
+      ctx.beginPath()
+      ctx.moveTo(pts[0].x, pts[0].y)
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y)
+      ctx.stroke()
     }
+
+    if (style === 'wave') {
+      strokePath(wavePath(stroke.points, amplitude))
+    } else if (style === 'zigzag') {
+      strokePath(zigzagPath(stroke.points, amplitude))
+    } else if (style === 'double') {
+      const [a, b] = doublePaths(stroke.points, amplitude * 0.7)
+      strokePath(a)
+      strokePath(b)
+    } else if (style === 'dash') {
+      ctx.setLineDash([amplitude * 1.5, amplitude])
+      strokePath(stroke.points)
+      ctx.setLineDash([])
+    } else {
+      strokePath(stroke.points)
+    }
+    ctx.restore()
   }
 
   function redraw() {
@@ -270,7 +332,7 @@ const DrawingCanvas = forwardRef(function DrawingCanvas(
     const point = toPagePoint(e)
     e.currentTarget.setPointerCapture(e.pointerId)
 
-    if (tool === 'pen' || tool === 'pencil' || tool === 'highlighter') {
+    if (tool === 'pen' || tool === 'pencil' || tool === 'highlighter' || tool === 'underline') {
       // Still writing — hold off on converting until the pen has rested.
       clearTimeout(idleTimerRef.current)
       drawingRef.current = {
@@ -283,6 +345,7 @@ const DrawingCanvas = forwardRef(function DrawingCanvas(
         // Fountain-pen width applies to the pen only; pencil and highlighter
         // keep their own look.
         ...(tool === 'pen' && neatWriting.penStyle === 'fountain' ? { style: 'fountain' } : {}),
+        ...(tool === 'underline' ? { decoration: toolSettings.decoration, opacity: 1 } : {}),
         points: [point]
       }
       if (drawingRef.current.style === 'fountain') {
@@ -315,7 +378,7 @@ const DrawingCanvas = forwardRef(function DrawingCanvas(
       const pts = drawingRef.current.points
       const p1 = pts[pts.length - 2] || pts[0]
       const p2 = pts[pts.length - 1]
-      drawStroke(ctx, { ...drawingRef.current, points: [p1, p2] }, false)
+      drawStroke(ctx, { ...drawingRef.current, points: [p1, p2] }, false, true)
     } else if (tool === 'eraser') {
       eraseAt(point)
     } else if (selectRectRef.current) {
@@ -334,13 +397,38 @@ const DrawingCanvas = forwardRef(function DrawingCanvas(
         if (isWriting && neatWriting.mode !== 'off') {
           finished = { ...finished, points: smoothStroke(finished.points) }
         }
-        if (finished.style === 'fountain') {
+        // Underlines get the same jitter-smoothing for a cleaner baseline
+        // to wave/zigzag from, but deliberately never go through
+        // isWriting's AI-conversion path below — an underline isn't
+        // handwriting to transcribe.
+        if (finished.tool === 'underline') {
+          finished = { ...finished, points: smoothStroke(finished.points) }
+        }
+
+        // Shape recognition (pen/pencil only), independent of neatWriting
+        // .mode — someone might want mode 'off' (raw ink) but still want
+        // circles/rectangles to snap. Runs before the fountain-width pass:
+        // a recognized shape gets one clean uniform outline, not organic
+        // hand-speed width variation, so fountain-width is skipped for it.
+        let shapeMatched = false
+        if (isWriting && neatWriting.shapeRecognition !== false) {
+          const shape = recognizeShape(finished.points)
+          const shapePoints = shape && shapeToPoints(shape)
+          if (shapePoints) {
+            finished = { ...finished, points: shapePoints }
+            shapeMatched = true
+          }
+        }
+
+        if (!shapeMatched && finished.style === 'fountain') {
           // Final pass over the (possibly smoothed) points: consistent
           // widths plus a pointed start and finish.
           finished = { ...finished, points: applyFountainWidths(finished.points, finished.width) }
         }
         onChange([...elements, finished])
-        if (isWriting && neatWriting.mode === 'type') queueConversion(finished.id)
+        // A recognized shape isn't handwriting — never send it off to be
+        // "read" as text.
+        if (isWriting && neatWriting.mode === 'type' && !shapeMatched) queueConversion(finished.id)
       } else if (neatWriting.mode === 'type' && pendingIdsRef.current.length > 0) {
         scheduleConversion() // the pen-down cleared the timer; restart it
       }

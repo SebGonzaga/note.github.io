@@ -11,6 +11,7 @@ export const FONT_OPTIONS = [
   { id: 'inter', label: 'Clean', group: 'Plain', family: "'Inter', system-ui, sans-serif" },
   { id: 'serif', label: 'Serif', group: 'Plain', family: "'Source Serif 4', Georgia, serif" },
   { id: 'print', label: 'Neat print', group: 'Plain', family: "'Patrick Hand', 'Comic Sans MS', system-ui, sans-serif" },
+  { id: 'rounded', label: 'Rounded', group: 'Plain', family: "'Nunito', system-ui, sans-serif" },
 
   // Calligraphy
   { id: 'script', label: 'Script', group: 'Calligraphy', family: "'Caveat', 'Segoe Script', cursive" },
@@ -18,6 +19,13 @@ export const FONT_OPTIONS = [
   { id: 'greatvibes', label: 'Great Vibes', group: 'Calligraphy', family: "'Great Vibes', 'Segoe Script', cursive" },
   { id: 'sacramento', label: 'Sacramento', group: 'Calligraphy', family: "'Sacramento', 'Segoe Script', cursive" },
   { id: 'parisienne', label: 'Parisienne', group: 'Calligraphy', family: "'Parisienne', 'Segoe Script', cursive" },
+  { id: 'allura', label: 'Allura', group: 'Calligraphy', family: "'Allura', 'Segoe Script', cursive" },
+  { id: 'alexbrush', label: 'Alex Brush', group: 'Calligraphy', family: "'Alex Brush', 'Segoe Script', cursive" },
+
+  // Elegant
+  { id: 'playfair', label: 'Playfair', group: 'Elegant', family: "'Playfair Display', Georgia, serif" },
+  { id: 'cormorant', label: 'Cormorant', group: 'Elegant', family: "'Cormorant Garamond', Georgia, serif" },
+  { id: 'italianno', label: 'Italianno', group: 'Elegant', family: "'Italianno', 'Segoe Script', cursive" },
 
   // Cute / handwriting
   { id: 'indieflower', label: 'Indie Flower', group: 'Cute', family: "'Indie Flower', 'Comic Sans MS', cursive" },
@@ -25,7 +33,14 @@ export const FONT_OPTIONS = [
   { id: 'shadows', label: 'Shadows', group: 'Cute', family: "'Shadows Into Light', 'Comic Sans MS', cursive" },
   { id: 'pacifico', label: 'Pacifico', group: 'Cute', family: "'Pacifico', 'Comic Sans MS', cursive" },
   { id: 'fredoka', label: 'Fredoka', group: 'Cute', family: "'Fredoka', system-ui, sans-serif" },
-  { id: 'quicksand', label: 'Quicksand', group: 'Cute', family: "'Quicksand', system-ui, sans-serif" }
+  { id: 'quicksand', label: 'Quicksand', group: 'Cute', family: "'Quicksand', system-ui, sans-serif" },
+  { id: 'kalam', label: 'Kalam', group: 'Cute', family: "'Kalam', 'Comic Sans MS', cursive" },
+  { id: 'architect', label: 'Architect', group: 'Cute', family: "'Architects Daughter', 'Comic Sans MS', cursive" },
+
+  // Bold / playful
+  { id: 'marker', label: 'Marker', group: 'Bold', family: "'Permanent Marker', 'Comic Sans MS', cursive" },
+  { id: 'baloo', label: 'Baloo', group: 'Bold', family: "'Baloo 2', system-ui, sans-serif" },
+  { id: 'bungee', label: 'Bungee', group: 'Bold', family: "'Bungee', system-ui, sans-serif" }
 ]
 
 export const DEFAULT_FONT_ID = 'inter'

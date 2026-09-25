@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import {
   Pen,
   Pencil,
@@ -15,10 +15,15 @@ import {
   Undo2,
   Redo2,
   Trash2,
-  Wand2
+  Wand2,
+  PenLine,
+  Sticker,
+  Shapes
 } from 'lucide-react'
 import { PALETTE } from '../../utils/toolDefaults.js'
 import { FONT_OPTIONS, fontFamilyFor } from '../../utils/fonts.js'
+import { UNDERLINE_STYLES } from '../../utils/decorations.js'
+import { STICKER_SETS } from '../../utils/stickers.js'
 
 // Renders <option>s grouped by category, each previewed in its own font.
 function FontOptions() {
@@ -47,6 +52,7 @@ const TOOLS = [
   { id: 'pen', label: 'Pen', icon: Pen },
   { id: 'pencil', label: 'Pencil', icon: Pencil },
   { id: 'highlighter', label: 'Highlighter', icon: Highlighter },
+  { id: 'underline', label: 'Decorative underline', icon: PenLine },
   { id: 'eraser', label: 'Eraser', icon: Eraser },
   { id: 'text', label: 'Text box', icon: Type }
 ]
@@ -78,15 +84,20 @@ export default function Toolbar({
   selectionCount,
   onDeleteSelection,
   onInsertImage,
+  onInsertSticker,
   neat,
   onNeatChange
 }) {
   const fileInputRef = useRef(null)
+  const [stickersOpen, setStickersOpen] = useState(false)
 
-  const showColor = tool === 'pen' || tool === 'pencil' || tool === 'highlighter' || tool === 'text'
-  const showWidth = tool === 'pen' || tool === 'pencil' || tool === 'highlighter' || tool === 'eraser'
+  const showColor =
+    tool === 'pen' || tool === 'pencil' || tool === 'highlighter' || tool === 'text' || tool === 'underline'
+  const showWidth =
+    tool === 'pen' || tool === 'pencil' || tool === 'highlighter' || tool === 'eraser' || tool === 'underline'
   const showOpacity = tool === 'pen' || tool === 'pencil'
   const showTextSettings = tool === 'text'
+  const showUnderlineSettings = tool === 'underline'
   const showNeat = !!neat && (tool === 'pen' || tool === 'pencil')
 
   function handleFileChange(e) {
@@ -131,7 +142,7 @@ export default function Toolbar({
         </IconBtn>
       </div>
 
-      <div className="flex shrink-0 items-center gap-1 border-l border-border pl-3">
+      <div className="relative flex shrink-0 items-center gap-1 border-l border-border pl-3">
         <IconBtn label="Insert image" onClick={() => fileInputRef.current?.click()}>
           <ImagePlus size={16} />
         </IconBtn>
@@ -142,6 +153,44 @@ export default function Toolbar({
           onChange={handleFileChange}
           className="hidden"
         />
+
+        {onInsertSticker && (
+          <>
+            <IconBtn
+              label="Stickers"
+              onClick={() => setStickersOpen((v) => !v)}
+              active={stickersOpen}
+            >
+              <Sticker size={16} />
+            </IconBtn>
+            {stickersOpen && (
+              <div className="absolute left-0 top-full z-20 mt-1 w-64 rounded-card border border-border bg-surface p-2 shadow-lg">
+                {STICKER_SETS.map((set) => (
+                  <div key={set.group} className="mb-2 last:mb-0">
+                    <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted">
+                      {set.group}
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {set.items.map((s) => (
+                        <button
+                          key={s.id}
+                          title={s.label}
+                          onClick={() => {
+                            onInsertSticker(s.dataUrl)
+                            setStickersOpen(false)
+                          }}
+                          className="rounded-card p-1.5 hover:bg-accent-soft"
+                        >
+                          <img src={s.dataUrl} alt={s.label} className="h-6 w-6" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
       </div>
 
       {showNeat && (
@@ -193,6 +242,37 @@ export default function Toolbar({
             <option value="classic">Classic</option>
           </select>
         </label>
+      )}
+
+      {neat && (tool === 'pen' || tool === 'pencil') && (
+        <div className="flex shrink-0 items-center border-l border-border pl-3">
+          <IconBtn
+            label="Snap rough circles, rectangles, lines and triangles to clean shapes"
+            active={neat.shapeRecognition !== false}
+            onClick={() => onNeatChange({ shapeRecognition: neat.shapeRecognition === false })}
+          >
+            <Shapes size={16} />
+          </IconBtn>
+        </div>
+      )}
+
+      {showUnderlineSettings && (
+        <div className="flex shrink-0 items-center gap-1 border-l border-border pl-3">
+          {UNDERLINE_STYLES.map((s) => (
+            <button
+              key={s.id}
+              title={s.label}
+              onClick={() => updateSettings({ decoration: s.id })}
+              className={`rounded-card px-2 py-1 text-xs ${
+                settings.decoration === s.id
+                  ? 'bg-accent text-white'
+                  : 'text-muted hover:bg-accent-soft hover:text-ink'
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
       )}
 
       {showColor && (
@@ -324,13 +404,15 @@ export default function Toolbar({
   )
 }
 
-function IconBtn({ children, label, disabled, ...props }) {
+function IconBtn({ children, label, disabled, active, className = '', ...props }) {
   return (
     <button
       aria-label={label}
       title={label}
       disabled={disabled}
-      className="rounded-card p-1.5 text-muted hover:bg-accent-soft hover:text-ink disabled:cursor-not-allowed disabled:opacity-30"
+      className={`rounded-card p-1.5 disabled:cursor-not-allowed disabled:opacity-30 ${
+        active ? 'bg-accent text-white' : 'text-muted hover:bg-accent-soft hover:text-ink'
+      } ${className}`}
       {...props}
     >
       {children}

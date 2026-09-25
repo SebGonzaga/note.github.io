@@ -18,6 +18,7 @@ import Toolbar from '../components/toolbar/Toolbar.jsx'
 import DrawingCanvas, { PAGE_WIDTH, PAGE_HEIGHT } from '../components/canvas/DrawingCanvas.jsx'
 import ElementsLayer from '../components/canvas/ElementsLayer.jsx'
 import { useHistory } from '../hooks/useHistory.js'
+import { STICKER_SIZE } from '../utils/stickers.js'
 import { useNeatWriting } from '../hooks/useNeatWriting.js'
 import { TOOL_DEFAULTS } from '../utils/toolDefaults.js'
 
@@ -27,7 +28,14 @@ const TEMPLATES = [
   { id: 'grid', label: 'Grid' },
   { id: 'dotted', label: 'Dotted' },
   { id: 'cornell', label: 'Cornell' },
-  { id: 'graph', label: 'Graph' }
+  { id: 'graph', label: 'Graph' },
+  // Aesthetic themes (FreeNotes-style) — still dotted/lined underneath a
+  // tint, not purely decorative.
+  { id: 'pastel-pink', label: 'Pink' },
+  { id: 'pastel-mint', label: 'Mint' },
+  { id: 'pastel-lavender', label: 'Lavender' },
+  { id: 'pastel-sky', label: 'Sky' },
+  { id: 'kraft', label: 'Kraft' }
 ]
 
 export default function NotebookPage() {
@@ -174,6 +182,13 @@ export default function NotebookPage() {
 
   function handleInsertImage(dataUrl, naturalWidth, naturalHeight) {
     elementsApiRef.current?.addImage(dataUrl, naturalWidth, naturalHeight)
+  }
+
+  function handleInsertSticker(dataUrl) {
+    // Stickers already know their own display size (they're small curated
+    // SVGs, not user photos), so this skips the "load the image to find
+    // its natural size" step that handleInsertImage needs for uploads.
+    elementsApiRef.current?.addImage(dataUrl, STICKER_SIZE, STICKER_SIZE)
   }
 
   if (!notebook) {
@@ -348,7 +363,7 @@ export default function NotebookPage() {
             elementsApiRef.current?.deleteSelected()
           }}
           onInsertImage={handleInsertImage}
-          neat={neat}
+          onInsertSticker={handleInsertSticker}          neat={neat}
           onNeatChange={updateNeat}
         />
 

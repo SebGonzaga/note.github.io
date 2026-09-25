@@ -152,6 +152,45 @@ Vercel CLI's `vercel dev`, which serves both the Vite frontend and the
   `DrawingCanvas.jsx` if that's too eager); the Neat print/Script fonts load
   from Google Fonts, so offline they fall back to a system font.
 
+**Aesthetic extras (FreeNotes-inspired, purely additive)**
+
+A batch of smaller features rounding out the FreeNotes comparison, added
+without touching any existing tool's behavior — each is either a new file
+or a clearly-separate branch alongside existing code:
+
+- **Expanded font library** — `utils/fonts.js` grew from 14 to 26 curated
+  fonts across five groups (Plain, Calligraphy, Elegant, Cute, Bold),
+  available anywhere fonts already showed up (the Text tool, "Convert to
+  text" mode).
+- **Decorative underlines** — a new toolbar tool alongside pen/pencil/
+  highlighter, styled wave, zigzag, double, or dash. Pure geometry
+  (`utils/decorations.js`: arc-length resampling + perpendicular offset),
+  computed fresh from the stroke's real points at draw time — selecting or
+  erasing a decorative underline hit-tests the actual drawn path, not the
+  rendered pattern, so nothing about selection/erase needed to change.
+- **Shape recognition** — draw a rough circle, rectangle, triangle, or
+  straight line with the pen or pencil and it snaps to a clean version on
+  lift (`services/ink/shapeRecognition.js`), a new toggle next to the pen
+  style picker. Deliberately conservative: a minimum size gate and strict
+  fit tolerances keep it from mistaking an isolated letter like "O" for a
+  circle — verified with test strokes for letters, scribbles, and
+  five-sided shapes all correctly declining to match, alongside clean and
+  hand-wobbled circles/rectangles/triangles/lines all correctly matching.
+  Independent of the neat-writing mode (works even with mode "off"), and a
+  recognized shape is never sent for AI conversion even in "Convert to
+  text" mode — it isn't handwriting.
+- **Stickers** — a curated set of small decorative SVGs (stars, hearts,
+  checkmarks, flowers) in `utils/stickers.js`, inserted through
+  `ElementsLayer`'s existing `addImage()` exactly like an uploaded photo —
+  no new element type, no changes to drag/resize/delete.
+- **Aesthetic page themes** — five new paper backgrounds (pastel pink/
+  mint/lavender/sky, kraft) alongside the original six, each still dotted
+  or lined underneath the tint rather than a purely decorative blank page.
+- **Notebook cover colors** — a swatch picker in each notebook's menu on
+  the library page, tinting its card. Notebooks created before this have
+  no `color` field at all and render exactly as they did — nothing to
+  migrate.
+
 **Phase 4 — PDF study system**
 - **Documents library** at `/documents`: upload by button or drag-and-drop,
   with rename / favorite / delete. Uploads are validated for file type and

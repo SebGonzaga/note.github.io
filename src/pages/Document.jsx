@@ -14,6 +14,7 @@ import { buildPdfContext, getPageText, getDocumentSampleText, DEFAULT_CONTEXT_MO
 import { indexDocument } from '../services/ai/rag.js'
 import { useHistory } from '../hooks/useHistory.js'
 import { useNeatWriting } from '../hooks/useNeatWriting.js'
+import { STICKER_SIZE } from '../utils/stickers.js'
 import { TOOL_DEFAULTS } from '../utils/toolDefaults.js'
 import * as docStore from '../services/storage/documents.js'
 
@@ -562,6 +563,7 @@ export default function Document() {
           elementsApiRef.current?.deleteSelected()
         }}
         onInsertImage={(src, w, h) => elementsApiRef.current?.addImage(src, w, h)}
+        onInsertSticker={(src) => elementsApiRef.current?.addImage(src, STICKER_SIZE, STICKER_SIZE)}
         neat={neat}
         onNeatChange={updateNeat}
       />

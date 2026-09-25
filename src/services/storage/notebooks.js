@@ -68,6 +68,17 @@ export async function toggleFavorite(id) {
   return put(STORES.notebooks, notebook)
 }
 
+// Cover color (FreeNotes-style aesthetic customization). `color` is null
+// to clear back to the default look — existing notebooks with no `color`
+// field at all render exactly as before (no migration needed, IndexedDB
+// records don't need a matching shape).
+export async function setNotebookColor(id, color) {
+  const notebook = await getById(STORES.notebooks, id)
+  if (!notebook) return null
+  notebook.color = color
+  return put(STORES.notebooks, notebook)
+}
+
 export async function moveNotebook(id, folderId) {
   const notebook = await getById(STORES.notebooks, id)
   if (!notebook) return null

@@ -10,6 +10,10 @@ import { DEFAULT_FONT_ID, FONT_OPTIONS } from '../utils/fonts.js'
 //   mode 'type'    — sharpen, plus: after a short pause the handwriting is
 //                    read by the AI service and swapped for typed text in
 //                    `font` (needs GEMINI_API_KEY on the server)
+//   shapeRecognition — when true (default), a rough circle/rectangle/line/
+//                    triangle drawn with the pen or pencil snaps to a clean
+//                    version of that shape on lift. Offline, geometric, same
+//                    spirit as `sharpen` — see services/ink/shapeRecognition.js
 //
 // Defaults to 'sharpen' because it needs nothing but the browser. The AI
 // conversion is opt-in since it makes network calls.
@@ -17,7 +21,7 @@ import { DEFAULT_FONT_ID, FONT_OPTIONS } from '../utils/fonts.js'
 const STORAGE_KEY = 'inkwell-neat-writing'
 const MODES = ['off', 'sharpen', 'type']
 const PEN_STYLES = ['classic', 'fountain']
-const DEFAULTS = { mode: 'sharpen', font: DEFAULT_FONT_ID, penStyle: 'fountain' }
+const DEFAULTS = { mode: 'sharpen', font: DEFAULT_FONT_ID, penStyle: 'fountain', shapeRecognition: true }
 
 function load() {
   try {
@@ -26,7 +30,11 @@ function load() {
       return {
         mode: MODES.includes(parsed.mode) ? parsed.mode : DEFAULTS.mode,
         font: FONT_OPTIONS.some((f) => f.id === parsed.font) ? parsed.font : DEFAULTS.font,
-        penStyle: PEN_STYLES.includes(parsed.penStyle) ? parsed.penStyle : DEFAULTS.penStyle
+        penStyle: PEN_STYLES.includes(parsed.penStyle) ? parsed.penStyle : DEFAULTS.penStyle,
+        shapeRecognition:
+          typeof parsed.shapeRecognition === 'boolean'
+            ? parsed.shapeRecognition
+            : DEFAULTS.shapeRecognition
       }
     }
   } catch {

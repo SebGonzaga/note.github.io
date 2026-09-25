@@ -120,3 +120,40 @@ textarea:focus-visible,
   background-size: 14px 14px;
   background-color: var(--surface);
 }
+
+/* Aesthetic pastel themes (FreeNotes-style) — dotted ruling on a tinted
+   background rather than a fixed border color, so each stays usable for
+   actual note-taking rather than being a purely decorative blank page. */
+.paper-pastel-pink {
+  background-image: radial-gradient(rgba(0, 0, 0, 0.12) 1.2px, transparent 1.2px);
+  background-size: 22px 22px;
+  background-color: #fdeef3;
+}
+
+.paper-pastel-mint {
+  background-image: radial-gradient(rgba(0, 0, 0, 0.12) 1.2px, transparent 1.2px);
+  background-size: 22px 22px;
+  background-color: #e9f7ef;
+}
+
+.paper-pastel-lavender {
+  background-image: radial-gradient(rgba(0, 0, 0, 0.12) 1.2px, transparent 1.2px);
+  background-size: 22px 22px;
+  background-color: #f1edfb;
+}
+
+.paper-pastel-sky {
+  background-image: radial-gradient(rgba(0, 0, 0, 0.12) 1.2px, transparent 1.2px);
+  background-size: 22px 22px;
+  background-color: #eaf4fc;
+}
+
+.paper-kraft {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent,
+    transparent 27px,
+    rgba(90, 62, 32, 0.18) 28px
+  );
+  background-color: #f3e7d3;
+}
